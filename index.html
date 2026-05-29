@@ -2,68 +2,68 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>理研 GX-3R Pro 監控器</title>
+    <title>GX-3R Pro 即時監控</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f6f9; }
-        .container { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        button { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; }
-        .btn-connect { background: #0078d7; color: white; }
-        #gas-display { margin-top: 20px; padding: 20px; border: 2px solid #ccc; border-radius: 8px; min-height: 100px; }
+        body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding: 20px; }
+        .card { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .box { padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: #f9f9f9; }
+        button { width: 100%; padding: 15px; border: none; border-radius: 8px; background: #0078d7; color: white; font-size: 1.1rem; cursor: pointer; }
     </style>
 </head>
 <body>
 
-<div class="container">
+<div class="card">
     <h2>GX-3R Pro 監控</h2>
-    <div id="status">準備就緒</div>
-    <button class="btn-connect" onclick="connectToRiken()">連線儀器</button>
-    <div id="gas-display">數據顯示區</div>
+    <button onclick="startConnection()">開始連線儀器</button>
+    <div id="status" style="margin: 15px; color: #555;">等待中...</div>
+    
+    <div id="gas-display">
+        <div class="data-grid" id="data-container">
+            <div class="box">O₂<br><b id="val0">--</b>%</div>
+            <div class="box">氣體2<br><b id="val1">--</b></div>
+            <div class="box">氣體3<br><b id="val2">--</b></div>
+            <div class="box">氣體4<br><b id="val3">--</b></div>
+        </div>
+        <p id="raw-log" style="font-size: 0.7rem; color: #aaa; margin-top: 20px;"></p>
+    </div>
 </div>
 
 <script>
-    let writeCharacteristic;
-    const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
-    const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671';
-    const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671';
+    let writeChar;
 
-    async function sendCommand() {
-        if (!writeCharacteristic) return;
-        const data = "0000DH,R";
-        const STX = 0x02; const ETX = 0x03; const EOT = 0x04;
-        let sumVal = STX + ETX;
-        for (let i = 0; i < data.length; i++) sumVal += data.charCodeAt(i);
-        const sumHex = (sumVal & 0xFF).toString(16).toUpperCase().padStart(2, '0');
-        const encoder = new TextEncoder();
-        const packet = new Uint8Array(1 + data.length + 1 + 2 + 1);
-        packet[0] = STX; packet.set(encoder.encode(data), 1);
-        packet[1 + data.length] = ETX; packet.set(encoder.encode(sumHex), 1 + data.length + 1);
-        packet[packet.length - 1] = EOT;
-        await writeCharacteristic.writeValue(packet);
-    }
-
-    async function connectToRiken() {
+    async function startConnection() {
         try {
-            const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [RIKEN_SERVICE_UUID] }] });
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ services: ['5699d362-0c53-11e7-93ae-92361f002671'] }]
+            });
             const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(RIKEN_SERVICE_UUID);
-            writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
-            const notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID);
-            
+            const service = await server.getPrimaryService('5699d362-0c53-11e7-93ae-92361f002671');
+            writeChar = await service.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
+            const notifyChar = await service.getCharacteristic('5699d646-0c53-11e7-93ae-92361f002671');
+
             await notifyChar.startNotifications();
-            notifyChar.oncharacteristicvaluechanged = (e) => {
+            notifyChar.addEventListener('characteristicvaluechanged', (e) => {
                 const raw = new TextDecoder().decode(e.target.value);
-                // 這裡暴力把數據丟到畫面
-                const parts = raw.split(',');
-                document.getElementById('gas-display').innerHTML = `
-                    <h3 style="color:green">氧氣濃度 (O₂)</h3>
-                    <div style="font-size: 40px;">${parts[3] || '...'} %</div>
-                    <small>原始: ${raw}</small>
-                `;
-            };
-            document.getElementById('status').innerText = "已連線，監控中...";
-            setInterval(sendCommand, 2000);
-        } catch (e) {
-            document.getElementById('status').innerText = "錯誤: " + e.message;
+                const p = raw.split(',');
+                if (p.length >= 7) {
+                    document.getElementById('val0').innerText = p[3];
+                    document.getElementById('val1').innerText = p[4];
+                    document.getElementById('val2').innerText = p[5];
+                    document.getElementById('val3').innerText = p[6];
+                    document.getElementById('raw-log').innerText = "原始: " + raw;
+                }
+            });
+
+            setInterval(async () => {
+                // 發送標準查詢封包
+                const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x03, 0x41, 0x38, 0x04]);
+                await writeChar.writeValue(packet);
+            }, 2000);
+
+            document.getElementById('status').innerText = "連線成功，監測中...";
+        } catch (err) {
+            document.getElementById('status').innerText = "連線失敗: " + err.message;
         }
     }
 </script>
