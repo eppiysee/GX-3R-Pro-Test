@@ -59,26 +59,26 @@ async function connectToRiken() {
 }
 
 // 3. 改用最穩定的「帶有回應的寫入」，確保密碼百分之百砸進去
+// 徹底對齊 LightBlue 歷史紀錄的終極發送函式
 async function sendRikenCommand() {
     if (!writeCharacteristic || isWriting) return;
+    
+    // 這是完全複製自你 LightBlue 發送成功的 23 位元組 16 進位原始數據 (0x00233030...)
+    const exactHexCommand = new Uint8Array([
+        0x00, 0x23, 0x30, 0x30, 0x30, 0x30, 0x34, 0x34, 
+        0x38, 0x32, 0x43, 0x35, 0x32, 0x32, 0x43, 0x30, 
+        0x33, 0x34, 0x31, 0x33, 0x38, 0x30, 0x34
+    ]);
     
     try {
         isWriting = true; // 上鎖
         
-        // 1. 直接對齊你在 LightBlue 成功的完整 ASCII 指令字串
-        // 包含前導符號 #、指令、以及結尾校驗碼
-        const commandString = "#0000DH,C522C03413804"; 
-        
-        // 2. 將字串轉換為瀏覽器專用的 Uint8Array 二進位陣列
-        const encoder = new TextEncoder();
-        const command = encoder.encode(commandString);
-        
-        // 3. 砸進 772 寫入通道
-        await writeCharacteristic.writeValueWithResponse(command);
-        console.log("【發送成功】已送出正確指令:", commandString);
+        // 帶回應寫入，確保晶片完整收下這 23 個 Byte
+        await writeCharacteristic.writeValueWithResponse(exactHexCommand);
+        console.log("【硬體密碼砸入成功】已送出 LightBlue 同款 Hex 陣列！");
         
     } catch (error) {
-        console.warn("寫入指令卡住，下個循環自動重試:", error);
+        console.warn("寫入指令忙碌中，等待下秒循環自動重試:", error);
     } finally {
         isWriting = false; // 解鎖
     }
