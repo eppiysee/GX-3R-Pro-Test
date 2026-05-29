@@ -43,14 +43,15 @@ async function connectToRiken() {
 }
 
 async function sendStableCommand() {
-    // 使用最標準的 Hex 指令
-    const cmd = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x2C, 0x03, 0x41, 0x38, 0x04]);
+    // 嘗試使用最基礎的 16 進位查詢指令
+    // 這是一個極簡封包，沒有複雜字串，直接測試硬體反應
+    const cmd = new Uint8Array([0x02, 0x47, 0x45, 0x54, 0x03]); // 試圖詢問狀態
     
     try {
         await writeCharacteristic.writeValue(cmd);
-        document.getElementById('status').innerText = "指令已送出，等待儀器回應...";
+        console.log("已發送基礎查詢指令");
     } catch (e) {
-        console.error(e);
+        console.error("寫入失敗:", e);
     }
 }
 
