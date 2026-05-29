@@ -14,7 +14,7 @@
 
 <div class="card">
     <h2>GX-3R Pro 即時氣體</h2>
-    <button onclick="startConnection()" style="padding:10px 20px;">連線並讀取</button>
+    <button onclick="startConnection()" style="padding:10px 20px;">連線並啟動數據流</button>
     <div id="status" style="margin:10px 0;">等待連線...</div>
     
     <div class="grid">
@@ -43,25 +43,27 @@
                 const raw = new TextDecoder().decode(e.target.value);
                 document.getElementById('raw-log').innerText = "原始數據: " + raw;
 
-                // 根據你提供的順序調整對應索引 (請觀察原始數據的逗號順序)
-                // 若原始數據格式是：0000DH,R,狀態,CH4,O2,CO,H2S,CO2...
-                const p = raw.split(',');
-                if (p.length >= 8) {
-                    document.getElementById('v_ch4').innerText = p[3];
-                    document.getElementById('v_o2').innerText = p[4];
-                    document.getElementById('v_co').innerText = p[5];
-                    document.getElementById('v_h2s').innerText = p[6];
-                    document.getElementById('v_co2').innerText = p[7];
+                // 如果原始數據超過逗號格式，我們才進行解析
+                if (raw.includes(',')) {
+                    const p = raw.split(',');
+                    // 根據您看到的原始數據長度動態顯示
+                    if (p.length >= 8) {
+                        document.getElementById('v_ch4').innerText = p[3];
+                        document.getElementById('v_o2').innerText = p[4];
+                        document.getElementById('v_co').innerText = p[5];
+                        document.getElementById('v_h2s').innerText = p[6];
+                        document.getElementById('v_co2').innerText = p[7];
+                    }
                 }
             });
 
+            // 改為持續發送啟動指令 (Address 00, Cmd: DH, Sub: S 代表 Start)
             setInterval(async () => {
-                // 發送請求指令
-                const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x03, 0x41, 0x38, 0x04]);
+                const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x53, 0x03, 0x41, 0x39, 0x04]);
                 await writeChar.writeValue(packet);
-            }, 2000);
+            }, 1000);
 
-            document.getElementById('status').innerText = "連線成功，接收中...";
+            document.getElementById('status').innerText = "已連線，嘗試啟動數據流...";
         } catch (err) {
             document.getElementById('status').innerText = "錯誤: " + err.message;
         }
