@@ -4,20 +4,30 @@
 
 function calculateCheckSum(dataString) {
 
-    let sum = 0x02;
+    let sum = 0;
 
+    // STX
+    sum += 0x02;
+
+    // DATA
     for (let i = 0; i < dataString.length; i++) {
         sum += dataString.charCodeAt(i);
     }
 
+    // ETX
     sum += 0x03;
 
-    return (sum & 0xFF)
+    // 取低位元
+    sum = sum & 0xFF;
+
+    // 2's complement
+    sum = (~sum + 1) & 0xFF;
+
+    return sum
         .toString(16)
         .toUpperCase()
         .padStart(2, '0');
 }
-
 
 // =======================
 // 建立 BLE 封包
@@ -69,13 +79,13 @@ async function sendDH(writeCharacteristic) {
     try {
 
         // 注意最後的 ,
-        const command = "0000DH,R,";
+        const command = "0000RC,R,";
 
         const packet = buildPacket(command);
 
         console.log("SEND DH:", packet);
 
-        await writeCharacteristic.writeValueWithoutResponse(packet);
+        await writeCharacteristic.writeValue(packet);
 
     } catch (err) {
 
