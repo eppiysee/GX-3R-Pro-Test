@@ -62,17 +62,23 @@ async function connectToRiken() {
 async function sendRikenCommand() {
     if (!writeCharacteristic || isWriting) return;
     
-    const command = new Uint8Array([
-        0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x2C, 0x03, 0x41, 0x38, 0x04
-    ]);
-    
     try {
         isWriting = true; // 上鎖
-        // 關鍵修改：使用 writeValueWithResponse 強制等待設備點頭收到
+        
+        // 1. 直接對齊你在 LightBlue 成功的完整 ASCII 指令字串
+        // 包含前導符號 #、指令、以及結尾校驗碼
+        const commandString = "#0000DH,C522C03413804"; 
+        
+        // 2. 將字串轉換為瀏覽器專用的 Uint8Array 二進位陣列
+        const encoder = new TextEncoder();
+        const command = encoder.encode(commandString);
+        
+        // 3. 砸進 772 寫入通道
         await writeCharacteristic.writeValueWithResponse(command);
-        console.log("密碼指令發送成功，等待儀器回傳...");
+        console.log("【發送成功】已送出正確指令:", commandString);
+        
     } catch (error) {
-        console.warn("寫入指令卡住或失敗，下個循環自動重試:", error);
+        console.warn("寫入指令卡住，下個循環自動重試:", error);
     } finally {
         isWriting = false; // 解鎖
     }
