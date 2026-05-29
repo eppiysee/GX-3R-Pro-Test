@@ -1,19 +1,421 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <title>GX-3R Pro 即時監控</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<title>GX-3R Pro BLE Monitor</title>
+
+<style>
+    body{
+        font-family: Arial, sans-serif;
+        background:#f5f7fb;
+        padding:20px;
+        text-align:center;
+    }
+
+    .card{
+        max-width:700px;
+        margin:auto;
+        background:#fff;
+        border-radius:16px;
+        padding:20px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    button{
+        padding:12px 24px;
+        border:none;
+        border-radius:10px;
+        background:#0078d7;
+        color:white;
+        font-size:16px;
+        cursor:pointer;
+    }
+
+    button:hover{
+        opacity:0.9;
+    }
+
+    .grid{
+        display:grid;
+        grid-template-columns:repeat(2,1fr);
+        gap:12px;
+        margin-top:20px;
+    }
+
+    .box{
+        background:#fafafa;
+        border:1px solid #ddd;
+        border-radius:10px;
+        padding:15px;
+    }
+
+    .title{
+        font-size:14px;
+        color:#666;
+    }
+
+    .value{
+        font-size:24px;
+        font-weight:bold;
+        margin-top:8px;
+        color:#0078d7;
+    }
+
+    #raw{
+        margin-top:20px;
+        font-size:12px;
+        color:#666;
+        word-break:break-all;
+        text-align:left;
+        background:#fafafa;
+        padding:10px;
+        border-radius:10px;
+    }
+
+    #status{
+        margin-top:10px;
+        font-weight:bold;
+    }
+</style>
 </head>
+
 <body>
-    <button onclick="connectToRiken()">連線並讀取</button>
-    <div id="raw-log">等待數據...</div>
-    <div style="display:grid; grid-template-columns: repeat(2, 1fr);">
-        <div>CH4: <span id="CH4">--</span></div>
-        <div>O2: <span id="O2">--</span></div>
-        <div>CO: <span id="CO">--</span></div>
-        <div>H2S: <span id="H2S">--</span></div>
-        <div>CO2: <span id="CO2">--</span></div>
+
+<div class="card">
+
+    <h2>GX-3R Pro BLE Monitor</h2>
+
+    <button id="connectBtn">
+        連線 GX-3R Pro
+    </button>
+
+    <div id="status">
+        尚未連線
     </div>
-    <script src="app.js"></script>
+
+    <div class="grid">
+
+        <div class="box">
+            <div class="title">CH4</div>
+            <div class="value" id="CH4">--</div>
+        </div>
+
+        <div class="box">
+            <div class="title">O2</div>
+            <div class="value" id="O2">--</div>
+        </div>
+
+        <div class="box">
+            <div class="title">CO</div>
+            <div class="value" id="CO">--</div>
+        </div>
+
+        <div class="box">
+            <div class="title">H2S</div>
+            <div class="value" id="H2S">--</div>
+        </div>
+
+        <div class="box">
+            <div class="title">Battery</div>
+            <div class="value" id="BAT">--</div>
+        </div>
+
+        <div class="box">
+            <div class="title">Status</div>
+            <div class="value" id="DEVSTATUS">--</div>
+        </div>
+
+    </div>
+
+    <div id="raw">
+        RAW DATA...
+    </div>
+
+</div>
+
+<script>
+
+let device;
+let server;
+let service;
+let notifyCharacteristic;
+let writeCharacteristic;
+let timer;
+
+const SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
+const TX_UUID      = '5699d646-0c53-11e7-93ae-92361f002671';
+const RX_UUID      = '5699d772-0c53-11e7-93ae-92361f002671';
+
+
+// =======================
+// Checksum
+// =======================
+
+function calculateCheckSum(dataString){
+
+    let sum = 0x02;
+
+    for(let i = 0; i < dataString.length; i++){
+        sum += dataString.charCodeAt(i);
+    }
+
+    sum += 0x03;
+
+    return (sum & 0xFF)
+        .toString(16)
+        .toUpperCase()
+        .padStart(2,'0');
+}
+
+
+// =======================
+// 建立封包
+// =======================
+
+function buildPacket(command){
+
+    const checksum = calculateCheckSum(command);
+
+    const encoder = new TextEncoder();
+
+    const dataBytes = encoder.encode(command);
+    const sumBytes  = encoder.encode(checksum);
+
+    const packet = new Uint8Array(
+        1 + dataBytes.length + 1 + 2 + 1
+    );
+
+    packet[0] = 0x02;
+
+    packet.set(dataBytes,1);
+
+    packet[1 + dataBytes.length] = 0x03;
+
+    packet.set(sumBytes,1 + dataBytes.length + 1);
+
+    packet[packet.length - 1] = 0x04;
+
+    return packet;
+}
+
+
+// =======================
+// 發送 DH 指令
+// =======================
+
+async function requestDH(){
+
+    if(!writeCharacteristic) return;
+
+    try{
+
+        // 最後一定要有 ,
+        const command = "0000DH,R,";
+
+        const packet = buildPacket(command);
+
+        console.log("SEND:", packet);
+
+        await writeCharacteristic.writeValueWithoutResponse(packet);
+
+    }catch(err){
+
+        console.error(err);
+
+    }
+}
+
+
+// =======================
+// 發送 RC 測試指令
+// =======================
+
+async function requestRC(){
+
+    if(!writeCharacteristic) return;
+
+    try{
+
+        const command = "0000RC,R,";
+
+        const packet = buildPacket(command);
+
+        console.log("SEND RC:", packet);
+
+        await writeCharacteristic.writeValueWithoutResponse(packet);
+
+    }catch(err){
+
+        console.error(err);
+
+    }
+}
+
+
+// =======================
+// 收資料
+// =======================
+
+function handleNotification(event){
+
+    try{
+
+        const value = event.target.value;
+
+        const bytes = new Uint8Array(value.buffer);
+
+        let raw = new TextDecoder().decode(bytes);
+
+        console.log("RAW:", raw);
+
+        document.getElementById("raw").innerText = raw;
+
+        // 去除控制字元
+        raw = raw
+            .replace(/\x02/g,'')
+            .replace(/\x03/g,'')
+            .replace(/\x04/g,'');
+
+        console.log("CLEAN:", raw);
+
+        const p = raw.split(',');
+
+        console.log(p);
+
+        // RC 測試回應
+        if(raw.includes("GX-3RPro")){
+
+            document.getElementById("status").innerText =
+                "RC 通訊成功";
+
+            return;
+        }
+
+        // DH 回應解析
+        if(p.length >= 12){
+
+            /*
+            p[0] = 0000DH
+            p[1] = R
+            p[2] = status
+            p[3] = mode
+            p[4] = alarm
+            p[5] = battery voltage
+            p[6] = battery icon
+            p[7] = gas1
+            p[8] = gas2
+            p[9] = gas3
+            p[10] = gas4
+            p[11] = gas5
+            */
+
+            document.getElementById("DEVSTATUS").innerText = p[2];
+
+            document.getElementById("BAT").innerText =
+                p[5] + "V";
+
+            document.getElementById("CH4").innerText =
+                p[7].trim();
+
+            document.getElementById("O2").innerText =
+                p[8].trim();
+
+            document.getElementById("CO").innerText =
+                p[9].trim();
+
+            document.getElementById("H2S").innerText =
+                p[10].trim();
+
+            document.getElementById("status").innerText =
+                "監控中";
+        }
+
+    }catch(err){
+
+        console.error(err);
+
+    }
+}
+
+
+// =======================
+// BLE 連線
+// =======================
+
+async function connectBLE(){
+
+    try{
+
+        document.getElementById("status").innerText =
+            "搜尋設備...";
+
+        device = await navigator.bluetooth.requestDevice({
+
+            filters:[
+                {
+                    services:[SERVICE_UUID]
+                }
+            ]
+
+        });
+
+        document.getElementById("status").innerText =
+            "連線中...";
+
+        server = await device.gatt.connect();
+
+        service = await server.getPrimaryService(
+            SERVICE_UUID
+        );
+
+        notifyCharacteristic =
+            await service.getCharacteristic(TX_UUID);
+
+        writeCharacteristic =
+            await service.getCharacteristic(RX_UUID);
+
+        await notifyCharacteristic.startNotifications();
+
+        notifyCharacteristic.addEventListener(
+            'characteristicvaluechanged',
+            handleNotification
+        );
+
+        document.getElementById("status").innerText =
+            "已連線";
+
+        // 先測試 RC
+        await requestRC();
+
+        // 1秒後開始抓 DH
+        setTimeout(async()=>{
+
+            await requestDH();
+
+            timer = setInterval(async()=>{
+
+                await requestDH();
+
+            },2000);
+
+        },1000);
+
+    }catch(err){
+
+        console.error(err);
+
+        document.getElementById("status").innerText =
+            "錯誤: " + err.message;
+    }
+}
+
+
+document.getElementById("connectBtn")
+    .addEventListener("click",connectBLE);
+
+</script>
+
 </body>
 </html>
