@@ -1,19 +1,39 @@
-<script>
-async function handleNotification(event) {
-    const value = event.target.value;
-    const decoder = new TextDecoder("ascii");
-    const textData = decoder.decode(value);
-    
-    // 檢查回傳是否包含數據 (DH,R)
-    if (textData.includes("DH,R")) {
-        const parts = textData.split(',');
-        // 依照規格書對應位置: [0]為ADD/CH, [1]為COMM, [2]為SUBCOMM, [3]起為數據
-        if (parts.length >= 7) {
-            document.getElementById("CH4").innerText = parts[3];
-            document.getElementById("O2").innerText = parts[4];
-            document.getElementById("CO").innerText = parts[5];
-            document.getElementById("H2S").innerText = parts[6];
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>GX-3R Pro 即時監控</title>
+</head>
+<body>
+    <div class="card">
+        <h2>GX-3R Pro 監控系統</h2>
+        <button id="connectBtn">連線並讀取</button>
+        <div id="status">等待連線...</div>
+        <div id="gas-display" style="margin-top:20px;">
+            <p>CH4: <span id="CH4">--</span></p>
+            <p>O2: <span id="O2">--</span></p>
+            <p>CO: <span id="CO">--</span></p>
+            <p>H2S: <span id="H2S">--</span></p>
+        </div>
+    </div>
+
+    <script>
+        // 將這些邏輯放在最後，確保 DOM 載入完成
+        async function handleNotification(event) {
+            const raw = new TextDecoder().decode(event.target.value);
+            console.log("收到數據:", raw);
+            
+            // 解析數據邏輯
+            if (raw.includes("DH,R")) {
+                const p = raw.split(',');
+                if (p.length >= 7) {
+                    document.getElementById('CH4').innerText = p[3];
+                    document.getElementById('O2').innerText = p[4];
+                    document.getElementById('CO').innerText = p[5];
+                    document.getElementById('H2S').innerText = p[6];
+                }
+            }
         }
-    }
-}
-</script>
+    </script>
+</body>
+</html>
