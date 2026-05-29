@@ -1,8 +1,7 @@
 // ==========================================
-// 理研 GX-3R Pro 藍牙即時監控 - 完整修正版 app.js
+// 理研 GX-3R Pro 藍牙即時監控 - 終極校正版 app.js
 // ==========================================
 
-// 1. 精準校正通道門牌號碼
 const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
 const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671'; // 寫入通道 (772)
 const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671'; // 監聽通道 (646)
@@ -12,50 +11,38 @@ let writeCharacteristic;
 let notifyCharacteristic;
 let pollingTimer;
 let responseBuffer = "";
-let isWriting = false; // 狀態鎖：防止前後指令撞車
+let isWriting = false; 
 
-// 輔助功能：讓程式暫停，給工控硬體晶片緩衝時間
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// 主連線功能
 async function connectToRiken() {
     const statusDiv = document.getElementById('status');
-    const gasDiv = document.getElementById('gas-display');
     
     try {
         statusDiv.innerText = "正在搜尋理研儀器...";
         statusDiv.style.color = "#666";
         
-        // 藍牙搜尋：全開放並預先宣告服務
         const device = await navigator.bluetooth.requestDevice({
             acceptAllDevices: true,
             optionalServices: [RIKEN_SERVICE_UUID]
         });
 
         statusDiv.innerText = "正在建立安全連線...";
-        console.log("已選擇裝置:", device.name);
-        
-        // 監聽斷線事件
         device.addEventListener('gattserverdisconnected', onDisconnected);
 
-        // 建立 GATT 連線
         gattServer = await device.gatt.connect();
         statusDiv.innerText = "藍牙已連線！等待硬體緩衝...";
-        console.log("GATT 連線成功");
         
-        // 【關鍵延遲】給工控藍牙晶片 1.5 秒握手緩衝
-        await delay(1500); 
+        await delay(1500); // 給工控藍牙晶片緩衝
 
         statusDiv.innerText = "正在讀取理研工控通道...";
         const service = await gattServer.getPrimaryService(RIKEN_SERVICE_UUID);
         
         await delay(500);
 
-        // 取得寫入與監聽特徵值
         writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
         notifyCharacteristic = await service.getCharacteristic(NOTIFY_CHAR_UUID);
 
-        // 啟動通知監聽
         statusDiv.innerText = "正在啟動數據監聽...";
         await notifyCharacteristic.startNotifications();
         notifyCharacteristic.addEventListener('characteristicvaluechanged', handleDataReceived);
@@ -63,9 +50,9 @@ async function connectToRiken() {
         statusDiv.innerText = "系統上線！開始定時讀取數據...";
         statusDiv.style.color = "green";
 
-        // 啟動定時敲門（每 2 秒發送一次密碼，避免晶片過載）
+        // 將 Polling 時間拉長到 3 秒，確保工控設備能從容回應
         if (pollingTimer) clearInterval(pollingTimer);
-        pollingTimer = setInterval(sendRikenCommand, 2000);
+        pollingTimer = setInterval(sendRikenCommand, 3000);
 
     } catch (error) {
         console.error("【連線錯誤】", error);
@@ -74,26 +61,24 @@ async function connectToRiken() {
     }
 }
 
-// 定時發送密碼指令（精準對齊 LightBlue 歷史紀錄）
+// 【終極校正】發送理研標準二進位 14-byte 密碼控制流
 async function sendRikenCommand() {
     if (!writeCharacteristic || isWriting) return;
     
-    // 嚴格對齊 LightBlue 23-byte 原始 Hex 數據，不多不少，不經由字串轉換避免掉碼
-    const exactHexCommand = new Uint8Array([
-        0x00, 0x23, 0x30, 0x30, 0x30, 0x30, 0x34, 0x34, 
-        0x38, 0x32, 0x43, 0x35, 0x32, 0x32, 0x43, 0x30, 
-        0x33, 0x34, 0x31, 0x33, 0x38, 0x30, 0x34
+    // 這是理研標準通訊明碼的純二進位 HEX 陣列（STX + 指令 + ETX + 校驗碼）
+    // 完全不透過英文字串轉換，直接走底層位元流
+    const rikenHexCommand = new Uint8Array([
+        0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x2C, 0x03, 0x41, 0x38, 0x04
     ]);
     
     try {
-        isWriting = true; // 上鎖
-        // 使用 WithResponse 強制雙向同步，確保晶片完整收下指令
-        await writeCharacteristic.writeValueWithResponse(exactHexCommand);
-        console.log("【發送成功】指令已完整寫入 772 通道");
+        isWriting = true; 
+        await writeCharacteristic.writeValueWithResponse(rikenHexCommand);
+        console.log("【發送成功】標準工控 14-byte 指令已砸入 772 通道");
     } catch (error) {
-        console.warn("寫入忙碌中或硬體未響應，等待下秒循環重試...", error);
+        console.warn("寫入忙碌，等待下個循環自動重試...", error);
     } finally {
-        isWriting = false; // 解鎖
+        isWriting = false; 
     }
 }
 
@@ -106,6 +91,51 @@ function handleDataReceived(event) {
     responseBuffer += chunk; 
     console.log("收到數據片段:", chunk);
     
-    // 當抓到工控結尾字元 (\x03) 或長度足夠時，觸發解析
-    if (responseBuffer.includes('\x03') || responseBuffer.length > 45) {
-        console.log("取得完整明碼，送
+    // 當抓到工控結尾字元 (\x03) 或長度大於 40 時觸發解析
+    if (responseBuffer.includes('\x03') || responseBuffer.length > 40) {
+        console.log("取得完整數據包，送入解析。");
+        parseGasData(responseBuffer);
+        responseBuffer = ""; 
+    }
+}
+
+// 地毯式搜索解析
+function parseGasData(rawData) {
+    const gasDiv = document.getElementById('gas-display');
+    
+    try {
+        // 清理掉不可見的控制字元
+        const cleanData = rawData.replace(/\x02|\x03|\x04/g, '').trim();
+        const dataArray = cleanData.split(',');
+        
+        let debugItemsHtml = "";
+        dataArray.forEach((item, index) => {
+            debugItemsHtml += `<b style="color:#0078d7;">[欄位 ${index}]:</b> ${item.trim()} <br>`;
+        });
+
+        gasDiv.innerHTML = `
+            <div style="font-size: 1.1rem; font-weight: bold; color: green; margin-bottom: 10px;">
+                📡 藍牙數據接收成功！
+            </div>
+            <div style="text-align: left; background: #eef5fc; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 0.9rem; max-height: 200px; overflow-y: auto;">
+                ${debugItemsHtml}
+            </div>
+            <div style="margin-top: 10px; font-size: 0.8rem; color: #999; word-break: break-all;">
+                原始字串: ${cleanData}
+            </div>
+        `;
+
+    } catch (err) {
+        console.error("解析渲染錯誤：", err);
+    }
+}
+
+function onDisconnected() {
+    if (pollingTimer) clearInterval(pollingTimer);
+    document.getElementById('status').innerText = "連線已中斷";
+    document.getElementById('status').style.color = "#666";
+}
+
+function disconnectDevice() {
+    if (gattServer && gattServer.connected) gattServer.disconnect();
+}
