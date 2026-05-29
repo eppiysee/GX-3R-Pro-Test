@@ -1,40 +1,35 @@
-const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
-const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671';
-const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671';
-
-let writeChar, notifyChar;
-
-async function connectToRiken() {
-    try {
-        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [RIKEN_SERVICE_UUID] }] });
-        const server = await device.gatt.connect();
-        const service = await server.getPrimaryService(RIKEN_SERVICE_UUID);
-        writeChar = await service.getCharacteristic(WRITE_CHAR_UUID);
-        notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID);
-
-        await notifyChar.startNotifications();
-        notifyChar.oncharacteristicvaluechanged = (e) => {
-            const raw = new TextDecoder().decode(e.target.value);
-            document.getElementById('gas-display').innerHTML = `<h3>數據: ${raw}</h3>`;
-        };
-        
-        document.getElementById('status').innerText = "已連線，發送請求中...";
-        setInterval(sendCommand, 2000);
-    } catch (e) {
-        document.getElementById('status').innerText = "失敗: " + e.message;
+// 1. 定義符合規格的 Checksum 計算函數
+function calculateCheckSum(dataString) {
+    // 將 STX(0x02) 後到 ETX(0x03) 前的所有 ASCII 字元加總
+    let sum = 0x02; // STX
+    for (let i = 0; i < dataString.length; i++) {
+        sum += dataString.charCodeAt(i);
     }
+    sum += 0x03; // ETX
+    // 取總和的後兩位 Hex 並轉為大寫字串
+    return (sum & 0xFF).toString(16).toUpperCase().padStart(2, '0');
 }
 
+// 2. 建構正確的封包
 async function sendCommand() {
-    // 嘗試使用不同指令組合以避開 F1 錯誤
-    const cmd = "0000GD,R"; 
+    if (!writeCharacteristic) return;
+
+    // 指令格式: Address(00) + Channel(00) + Command(DH) + Subcommand(R)
+    // 總字串: "0000DH,R"
+    const cmdStr = "0000DH,R";
+    const sumHex = calculateCheckSum(cmdStr);
+    
+    // 建構 Array: STX + DATA + ETX + SUM + EOT
     const encoder = new TextEncoder();
-    const data = encoder.encode(cmd);
-    const packet = new Uint8Array(data.length + 4);
+    const dataBytes = encoder.encode(cmdStr);
+    const sumBytes = encoder.encode(sumHex);
+    
+    const packet = new Uint8Array(1 + dataBytes.length + 1 + 2 + 1);
     packet[0] = 0x02; // STX
-    packet.set(data, 1);
-    packet[data.length + 1] = 0x03; // ETX
-    packet[data.length + 2] = 0x41; // 簡易校驗碼範例
-    packet[data.length + 3] = 0x04; // EOT
-    await writeChar.writeValue(packet);
+    packet.set(dataBytes, 1);
+    packet[1 + dataBytes.length] = 0x03; // ETX
+    packet.set(sumBytes, 1 + dataBytes.length + 1);
+    packet[packet.length - 1] = 0x04; // EOT
+
+    await writeCharacteristic.writeValue(packet);
 }
