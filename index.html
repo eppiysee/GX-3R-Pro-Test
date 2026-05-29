@@ -2,75 +2,70 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GX-3R Pro 藍牙監控系統</title>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0078d7">
-    
+    <title>理研 GX-3R Pro 監控器</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            text-align: center;
-            background-color: #f4f6f9;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 400px;
-            margin: 30px auto;
-            background: white;
-            padding: 30px;
-            border-radius: 16px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        button {
-            width: 100%;
-            padding: 14px;
-            font-size: 1.1rem;
-            font-weight: bold;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            margin: 10px 0;
-        }
-        .btn-connect { background-color: #0078d7; color: white; }
-        .btn-disconnect { background-color: #e0e0e0; color: #333; }
-        #status { margin: 15px 0; font-size: 0.95rem; color: #666; }
-        #gas-display {
-            margin-top: 25px;
-            padding: 20px;
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            min-height: 120px;
-        }
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f6f9; }
+        .container { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        button { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+        .btn-connect { background: #0078d7; color: white; }
+        #gas-display { margin-top: 20px; padding: 20px; border: 2px solid #ccc; border-radius: 8px; min-height: 100px; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h2>理研 GX-3R Pro</h2>
-        <h3>藍牙氣體即時監控</h3>
-        
-        <div id="status">未連線</div>
-        
-        <button class="btn-connect" onclick="connectToRiken()">連線儀器</button>
-        <button class="btn-disconnect" onclick="disconnectDevice()">中斷連線</button>
-        
-        <div id="gas-display">
-            <span style="color: #999;">請點擊上方按鈕開始連線</span>
-        </div>
-    </div>
+<div class="container">
+    <h2>GX-3R Pro 監控</h2>
+    <div id="status">準備就緒</div>
+    <button class="btn-connect" onclick="connectToRiken()">連線儀器</button>
+    <div id="gas-display">數據顯示區</div>
+</div>
 
-    <script>
-        // 註冊 PWA Service Worker (離線開啟大腦)
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                    .then(reg => console.log('PWA Service Worker 註冊成功！', reg.scope))
-                    .catch(err => console.log('Service Worker 註冊失敗：', err));
-            });
+<script>
+    let writeCharacteristic;
+    const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
+    const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671';
+    const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671';
+
+    async function sendCommand() {
+        if (!writeCharacteristic) return;
+        const data = "0000DH,R";
+        const STX = 0x02; const ETX = 0x03; const EOT = 0x04;
+        let sumVal = STX + ETX;
+        for (let i = 0; i < data.length; i++) sumVal += data.charCodeAt(i);
+        const sumHex = (sumVal & 0xFF).toString(16).toUpperCase().padStart(2, '0');
+        const encoder = new TextEncoder();
+        const packet = new Uint8Array(1 + data.length + 1 + 2 + 1);
+        packet[0] = STX; packet.set(encoder.encode(data), 1);
+        packet[1 + data.length] = ETX; packet.set(encoder.encode(sumHex), 1 + data.length + 1);
+        packet[packet.length - 1] = EOT;
+        await writeCharacteristic.writeValue(packet);
+    }
+
+    async function connectToRiken() {
+        try {
+            const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [RIKEN_SERVICE_UUID] }] });
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService(RIKEN_SERVICE_UUID);
+            writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
+            const notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID);
+            
+            await notifyChar.startNotifications();
+            notifyChar.oncharacteristicvaluechanged = (e) => {
+                const raw = new TextDecoder().decode(e.target.value);
+                // 這裡暴力把數據丟到畫面
+                const parts = raw.split(',');
+                document.getElementById('gas-display').innerHTML = `
+                    <h3 style="color:green">氧氣濃度 (O₂)</h3>
+                    <div style="font-size: 40px;">${parts[3] || '...'} %</div>
+                    <small>原始: ${raw}</small>
+                `;
+            };
+            document.getElementById('status').innerText = "已連線，監控中...";
+            setInterval(sendCommand, 2000);
+        } catch (e) {
+            document.getElementById('status').innerText = "錯誤: " + e.message;
         }
-    </script>
-    <script src="app.js"></script>
+    }
+</script>
 </body>
 </html>
