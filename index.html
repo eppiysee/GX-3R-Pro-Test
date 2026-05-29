@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>GX-3R Pro 數據解析</title>
+    <title>GX-3R Pro 強制讀取器</title>
     <style>
         body { font-family: sans-serif; text-align: center; background: #f4f6f9; padding: 20px; }
         .card { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -14,17 +14,17 @@
 
 <div class="card">
     <h2>GX-3R Pro 即時氣體</h2>
-    <button onclick="startConnection()" style="padding:10px 20px;">連線並啟動數據流</button>
+    <button onclick="startConnection()" style="padding:10px 20px;">強制循環讀取</button>
     <div id="status" style="margin:10px 0;">等待連線...</div>
     
     <div class="grid">
-        <div class="box">CH4<br><b id="v_ch4">--</b> %LEL</div>
-        <div class="box">O₂<br><b id="v_o2">--</b> %</div>
-        <div class="box">CO<br><b id="v_co">--</b> ppm</div>
-        <div class="box">H₂S<br><b id="v_h2s">--</b> ppm</div>
-        <div class="box">CO₂<br><b id="v_co2">--</b> ppm</div>
+        <div class="box">CH4<br><b id="v_ch4">--</b></div>
+        <div class="box">O₂<br><b id="v_o2">--</b></div>
+        <div class="box">CO<br><b id="v_co">--</b></div>
+        <div class="box">H₂S<br><b id="v_h2s">--</b></div>
+        <div class="box">CO₂<br><b id="v_co2">--</b></div>
     </div>
-    <p id="raw-log" style="font-size:0.8rem; color:#888; margin-top:20px; word-break:break-all;"></p>
+    <p id="raw-log" style="font-size:0.8rem; color:#888; margin-top:20px;"></p>
 </div>
 
 <script>
@@ -41,29 +41,28 @@
             await notifyChar.startNotifications();
             notifyChar.addEventListener('characteristicvaluechanged', (e) => {
                 const raw = new TextDecoder().decode(e.target.value);
-                document.getElementById('raw-log').innerText = "原始數據: " + raw;
+                document.getElementById('raw-log').innerText = "回傳: " + raw;
 
-                // 如果原始數據超過逗號格式，我們才進行解析
-                if (raw.includes(',')) {
-                    const p = raw.split(',');
-                    // 根據您看到的原始數據長度動態顯示
-                    if (p.length >= 8) {
-                        document.getElementById('v_ch4').innerText = p[3];
-                        document.getElementById('v_o2').innerText = p[4];
-                        document.getElementById('v_co').innerText = p[5];
-                        document.getElementById('v_h2s').innerText = p[6];
-                        document.getElementById('v_co2').innerText = p[7];
-                    }
+                // 這裡改為更寬鬆的解析：只要包含逗號就嘗試切分
+                const p = raw.split(',');
+                if (p.length > 5) { // 假設數據串長度足夠
+                    document.getElementById('v_ch4').innerText = p[3] || '--';
+                    document.getElementById('v_o2').innerText = p[4] || '--';
+                    document.getElementById('v_co').innerText = p[5] || '--';
+                    document.getElementById('v_h2s').innerText = p[6] || '--';
+                    document.getElementById('v_co2').innerText = p[7] || '--';
                 }
             });
 
-            // 改為持續發送啟動指令 (Address 00, Cmd: DH, Sub: S 代表 Start)
+            // 改用「讀取請求」模式：送出詢問，讓它回傳當前數值
             setInterval(async () => {
-                const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x53, 0x03, 0x41, 0x39, 0x04]);
+                // 指令: 0000 + GD (Gas Data) + , + R (Read)
+                const data = "0000GD,R";
+                const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x47, 0x44, 0x2C, 0x52, 0x03, 0x41, 0x35, 0x04]);
                 await writeChar.writeValue(packet);
             }, 1000);
 
-            document.getElementById('status').innerText = "已連線，嘗試啟動數據流...";
+            document.getElementById('status').innerText = "已連線，強制讀取中...";
         } catch (err) {
             document.getElementById('status').innerText = "錯誤: " + err.message;
         }
