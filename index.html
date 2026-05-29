@@ -2,70 +2,39 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>GX-3R Pro 監控器</title>
+    <title>GX-3R Pro 修復版</title>
     <style>
-        body { background: #121212; color: #fff; text-align: center; font-family: sans-serif; }
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-width: 900px; margin: 20px auto; }
-        .card { background: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
-        .value { color: #00ff66; font-size: 24px; font-weight: bold; }
-        #debug-log { background: #000; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; margin-top: 20px; text-align: left; max-height: 150px; overflow-y: auto; }
+        body { background: #121212; color: #00ff41; font-family: monospace; padding: 20px; }
+        .box { border: 1px solid #333; padding: 10px; margin: 10px; }
     </style>
 </head>
 <body>
-    <h1>GX-3R Pro 即時儀表板</h1>
-    <button id="btn" style="padding:15px 30px; font-size:18px;">連線儀器</button>
-    <div id="status">監控中...</div>
-    <div class="grid">
-        <div class="card">CH₄<br><div class="value" id="CH4">--</div></div>
-        <div class="card">O₂<br><div class="value" id="O2">--</div></div>
-        <div class="card">CO<br><div class="value" id="CO">--</div></div>
-        <div class="card">H₂S<br><div class="value" id="H2S">--</div></div>
-        <div class="card">CO₂<br><div class="value" id="CO2">--</div></div>
-    </div>
-    <div id="debug-log">Debug 視窗：等待數據...</div>
+    <h1>儀器連線測試</h1>
+    <button id="btn" style="padding:10px;">點擊測試指令</button>
+    <div id="log" class="box">等待測試...</div>
 
 <script>
-    const SERVICE = '5699d362-0c53-11e7-93ae-92361f002671';
-    const TX = '5699d646-0c53-11e7-93ae-92361f002671';
-    const RX = '5699d772-0c53-11e7-93ae-92361f002671';
-    const log = document.getElementById('debug-log');
-
-    function updateLog(msg) { log.innerText = msg; }
+    // 這一版我們徹底簡化指令發送邏輯
+    function calculateCheckSum(str) {
+        let sum = 0;
+        for (let i = 0; i < str.length; i++) sum += str.charCodeAt(i);
+        // 理研通常使用 (STX + DATA + ETX) 的總和取後兩位 Hex
+        let val = (sum + 0x02 + 0x03) & 0xFF;
+        return val.toString(16).toUpperCase().padStart(2, '0');
+    }
 
     document.getElementById('btn').onclick = async () => {
-        try {
-            const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
-            const srv = await (await dev.gatt.connect()).getPrimaryService(SERVICE);
-            const notify = await srv.getCharacteristic(TX);
-            const write = await srv.getCharacteristic(RX);
+        const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: ['5699d362-0c53-11e7-93ae-92361f002671'] }] });
+        const srv = await (await dev.gatt.connect()).getPrimaryService('5699d362-0c53-11e7-93ae-92361f002671');
+        const write = await srv.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
 
-            await notify.startNotifications();
-            notify.oncharacteristicvaluechanged = (e) => {
-                const arr = new Uint8Array(e.target.value.buffer);
-                const text = new TextDecoder().decode(arr);
-                updateLog("收到數據: " + text); // 【關鍵：在這裡看儀器吐出什麼】
-                
-                const nums = text.match(/[-+]?[0-9]*\.?[0-9]+/g);
-                if (nums && nums.length >= 5) {
-                    document.getElementById('CH4').innerText = nums[0];
-                    document.getElementById('O2').innerText = nums[1];
-                    document.getElementById('CO').innerText = nums[2];
-                    document.getElementById('H2S').innerText = nums[3];
-                    document.getElementById('CO2').innerText = nums[4];
-                }
-            };
-
-            setInterval(async () => {
-                // 發送 GD,R 指令 (讀取氣體)
-                const cmd = "0000GD,R,";
-                let bytes = [0x02, ...[...cmd].map(c => c.charCodeAt(0)), 0x03];
-                let sum = bytes.reduce((a, b) => a + b, 0);
-                let hex = ((-sum) & 0xFF).toString(16).toUpperCase().padStart(2, '0');
-                [...hex].forEach(c => bytes.push(c.charCodeAt(0)));
-                bytes.push(0x04);
-                await write.writeValue(new Uint8Array(bytes));
-            }, 1000);
-        } catch (e) { updateLog("錯誤: " + e.message); }
+        // 嘗試最簡化的讀取指令
+        const cmd = "0000DH,R";
+        const sum = calculateCheckSum(cmd);
+        const packet = new Uint8Array([0x02, ...[...cmd].map(c=>c.charCodeAt(0)), 0x03, ...[...sum].map(c=>c.charCodeAt(0)), 0x04]);
+        
+        await write.writeValue(packet);
+        document.getElementById('log').innerText = "已發送指令，請觀察儀器回傳是否變化";
     };
 </script>
 </body>
