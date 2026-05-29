@@ -10,14 +10,15 @@ let responseBuffer = "";
 
 async function connectToRiken() {
     try {
-        // 1. 請求藍牙裝置（過濾理研的 Service UUID）
-        const device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: [RIKEN_SERVICE_UUID] }]
-        });
+        // 【把原本的 navigator.bluetooth.requestDevice({...}) 改成下面這段】
 
-        // 2. 連線到 GATT 伺服器
-        gattServer = await device.gatt.connect();
-        
+const device = await navigator.bluetooth.requestDevice({
+        // 1. 改成接受所有藍牙裝置，這樣絕對能順利配對成功
+        acceptAllDevices: true,
+    
+        // 2. 【最關鍵】預先向瀏覽器申報：我待會連線後，一定要存取理研的這個主服務！
+        optionalServices: [RIKEN_SERVICE_UUID] 
+    });        
         // 3. 取得 Service
         const service = await gattServer.getPrimaryService(RIKEN_SERVICE_UUID);
 
