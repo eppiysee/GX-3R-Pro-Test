@@ -2,36 +2,32 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>GX-3R Pro 即時監控</title>
+    <title>GX-3R Pro 數據解析</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding: 20px; }
-        .card { max-width: 400px; margin: auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
-        .box { padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: #f9f9f9; }
-        button { width: 100%; padding: 15px; border: none; border-radius: 8px; background: #0078d7; color: white; font-size: 1.1rem; cursor: pointer; }
+        body { font-family: sans-serif; text-align: center; background: #f4f6f9; padding: 20px; }
+        .card { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .box { padding: 15px; border: 1px solid #ddd; border-radius: 8px; background: #fff; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h2>GX-3R Pro 監控</h2>
-    <button onclick="startConnection()">開始連線儀器</button>
-    <div id="status" style="margin: 15px; color: #555;">等待中...</div>
+    <h2>GX-3R Pro 即時氣體</h2>
+    <button onclick="startConnection()" style="padding:10px 20px;">連線並讀取</button>
+    <div id="status" style="margin:10px 0;">等待連線...</div>
     
-    <div id="gas-display">
-        <div class="data-grid" id="data-container">
-            <div class="box">O₂<br><b id="val0">--</b>%</div>
-            <div class="box">氣體2<br><b id="val1">--</b></div>
-            <div class="box">氣體3<br><b id="val2">--</b></div>
-            <div class="box">氣體4<br><b id="val3">--</b></div>
-        </div>
-        <p id="raw-log" style="font-size: 0.7rem; color: #aaa; margin-top: 20px;"></p>
+    <div class="grid">
+        <div class="box">CH4<br><b id="v_ch4">--</b> %LEL</div>
+        <div class="box">O₂<br><b id="v_o2">--</b> %</div>
+        <div class="box">CO<br><b id="v_co">--</b> ppm</div>
+        <div class="box">H₂S<br><b id="v_h2s">--</b> ppm</div>
+        <div class="box">CO₂<br><b id="v_co2">--</b> ppm</div>
     </div>
+    <p id="raw-log" style="font-size:0.8rem; color:#888; margin-top:20px; word-break:break-all;"></p>
 </div>
 
 <script>
-    let writeChar;
-
     async function startConnection() {
         try {
             const device = await navigator.bluetooth.requestDevice({
@@ -39,31 +35,35 @@
             });
             const server = await device.gatt.connect();
             const service = await server.getPrimaryService('5699d362-0c53-11e7-93ae-92361f002671');
-            writeChar = await service.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
+            const writeChar = await service.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
             const notifyChar = await service.getCharacteristic('5699d646-0c53-11e7-93ae-92361f002671');
 
             await notifyChar.startNotifications();
             notifyChar.addEventListener('characteristicvaluechanged', (e) => {
                 const raw = new TextDecoder().decode(e.target.value);
+                document.getElementById('raw-log').innerText = "原始數據: " + raw;
+
+                // 根據你提供的順序調整對應索引 (請觀察原始數據的逗號順序)
+                // 若原始數據格式是：0000DH,R,狀態,CH4,O2,CO,H2S,CO2...
                 const p = raw.split(',');
-                if (p.length >= 7) {
-                    document.getElementById('val0').innerText = p[3];
-                    document.getElementById('val1').innerText = p[4];
-                    document.getElementById('val2').innerText = p[5];
-                    document.getElementById('val3').innerText = p[6];
-                    document.getElementById('raw-log').innerText = "原始: " + raw;
+                if (p.length >= 8) {
+                    document.getElementById('v_ch4').innerText = p[3];
+                    document.getElementById('v_o2').innerText = p[4];
+                    document.getElementById('v_co').innerText = p[5];
+                    document.getElementById('v_h2s').innerText = p[6];
+                    document.getElementById('v_co2').innerText = p[7];
                 }
             });
 
             setInterval(async () => {
-                // 發送標準查詢封包
+                // 發送請求指令
                 const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x03, 0x41, 0x38, 0x04]);
                 await writeChar.writeValue(packet);
             }, 2000);
 
-            document.getElementById('status').innerText = "連線成功，監測中...";
+            document.getElementById('status').innerText = "連線成功，接收中...";
         } catch (err) {
-            document.getElementById('status').innerText = "連線失敗: " + err.message;
+            document.getElementById('status').innerText = "錯誤: " + err.message;
         }
     }
 </script>
