@@ -1,5 +1,5 @@
 // ==========================================
-// 理研 GX-3R Pro 藍牙即時監控 - 終極校正版 app.js
+// 理研 GX-3R Pro 藍牙即時監控 - 終極交叉除錯版 app.js
 // ==========================================
 
 const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
@@ -13,11 +13,13 @@ let pollingTimer;
 let responseBuffer = "";
 let isWriting = false; 
 
+// 測試模式計數器
+let tryCount = 0;
+
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 async function connectToRiken() {
     const statusDiv = document.getElementById('status');
-    
     try {
         statusDiv.innerText = "正在搜尋理研儀器...";
         statusDiv.style.color = "#666";
@@ -32,12 +34,10 @@ async function connectToRiken() {
 
         gattServer = await device.gatt.connect();
         statusDiv.innerText = "藍牙已連線！等待硬體緩衝...";
-        
-        await delay(1500); // 給工控藍牙晶片緩衝
+        await delay(1500); 
 
         statusDiv.innerText = "正在讀取理研工控通道...";
         const service = await gattServer.getPrimaryService(RIKEN_SERVICE_UUID);
-        
         await delay(500);
 
         writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
@@ -47,12 +47,12 @@ async function connectToRiken() {
         await notifyCharacteristic.startNotifications();
         notifyCharacteristic.addEventListener('characteristicvaluechanged', handleDataReceived);
         
-        statusDiv.innerText = "系統上線！開始定時讀取數據...";
+        statusDiv.innerText = "系統上線！開始交叉測試敲門指令...";
         statusDiv.style.color = "green";
 
-        // 將 Polling 時間拉長到 3 秒，確保工控設備能從容回應
+        // 每 2.5 秒輪流更換發送策略測試
         if (pollingTimer) clearInterval(pollingTimer);
-        pollingTimer = setInterval(sendRikenCommand, 3000);
+        pollingTimer = setInterval(sendRikenCommandCrossTest, 2500);
 
     } catch (error) {
         console.error("【連線錯誤】", error);
@@ -61,53 +61,79 @@ async function connectToRiken() {
     }
 }
 
-// 【終極校正】發送理研標準二進位 14-byte 密碼控制流
-async function sendRikenCommand() {
+// 【交叉除錯核心】測試大端序/小端序 與 有無回應寫入
+async function sendRikenCommandCrossTest() {
     if (!writeCharacteristic || isWriting) return;
     
-    // 這是理研標準通訊明碼的純二進位 HEX 陣列（STX + 指令 + ETX + 校驗碼）
-    // 完全不透過英文字串轉換，直接走底層位元流
-    const rikenHexCommand = new Uint8Array([
-        0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x2C, 0x03, 0x41, 0x38, 0x04
-    ]);
-    
     try {
-        isWriting = true; 
-        await writeCharacteristic.writeValueWithResponse(rikenHexCommand);
-        console.log("【發送成功】標準工控 14-byte 指令已砸入 772 通道");
+        isWriting = true;
+        tryCount++;
+        
+        // 方案 A：LightBlue 原始順序 (00 23 ...)
+        const cmdNormal = new Uint8Array([
+            0x00, 0x23, 0x30, 0x30, 0x30, 0x30, 0x34, 0x34, 
+            0x38, 0x32, 0x43, 0x35, 0x32, 0x32, 0x43, 0x30, 
+            0x33, 0x34, 0x31, 0x33, 0x38, 0x30, 0x34
+        ]);
+
+        // 方案 B：開頭端序翻轉 (23 00 ...) 防止瀏覽器在底層幫你自動對調
+        const cmdFlipped = new Uint8Array([
+            0x23, 0x00, 0x30, 0x30, 0x30, 0x30, 0x34, 0x34, 
+            0x38, 0x32, 0x43, 0x35, 0x32, 0x32, 0x43, 0x30, 
+            0x33, 0x34, 0x31, 0x33, 0x38, 0x30, 0x34
+        ]);
+
+        const mode = tryCount % 4;
+        const debugLabel = document.getElementById('status');
+
+        if (mode === 1) {
+            debugLabel.innerText = "⚡ 測試模式 1：原始順序 + 帶回應寫入";
+            await writeCharacteristic.writeValueWithResponse(cmdNormal);
+        } else if (mode === 2) {
+            debugLabel.innerText = "⚡ 測試模式 2：原始順序 + 無回應寫入";
+            await writeCharacteristic.writeValueWithoutResponse(cmdNormal);
+        } else if (mode === 3) {
+            debugLabel.innerText = "⚡ 測試模式 3：端序翻轉 + 帶回應寫入";
+            await writeCharacteristic.writeValueWithResponse(cmdFlipped);
+        } else {
+            debugLabel.innerText = "⚡ 測試模式 4：端序翻轉 + 無回應寫入";
+            await writeCharacteristic.writeValueWithoutResponse(cmdFlipped);
+        }
+
     } catch (error) {
-        console.warn("寫入忙碌，等待下個循環自動重試...", error);
+        console.warn("本次寫入嘗試失敗:", error);
     } finally {
         isWriting = false; 
     }
 }
 
-// 接收數據與斷包拼接
 function handleDataReceived(event) {
     const value = event.target.value;
     const decoder = new TextDecoder('utf-8');
     const chunk = decoder.decode(value);
     
     responseBuffer += chunk; 
-    console.log("收到數據片段:", chunk);
     
-    // 當抓到工控結尾字元 (\x03) 或長度大於 40 時觸發解析
     if (responseBuffer.includes('\x03') || responseBuffer.length > 40) {
-        console.log("取得完整數據包，送入解析。");
         parseGasData(responseBuffer);
         responseBuffer = ""; 
     }
 }
 
-// 地毯式搜索解析
 function parseGasData(rawData) {
     const gasDiv = document.getElementById('gas-display');
-    
     try {
-        // 清理掉不可見的控制字元
         const cleanData = rawData.replace(/\x02|\x03|\x04/g, '').trim();
         const dataArray = cleanData.split(',');
         
+        // 如果成功打破 F0 大魔王，字串長度必定會變長
+        if (dataArray.length > 3) {
+            // 成功撈到完整資料，停止測試定時器，改為鎖定成功模式的高頻 Polling
+            clearInterval(pollingTimer);
+            document.getElementById('status').innerText = "🎉 密碼破解成功！數值已鎖定。";
+            document.getElementById('status').style.color = "green";
+        }
+
         let debugItemsHtml = "";
         dataArray.forEach((item, index) => {
             debugItemsHtml += `<b style="color:#0078d7;">[欄位 ${index}]:</b> ${item.trim()} <br>`;
@@ -115,7 +141,7 @@ function parseGasData(rawData) {
 
         gasDiv.innerHTML = `
             <div style="font-size: 1.1rem; font-weight: bold; color: green; margin-bottom: 10px;">
-                📡 藍牙數據接收成功！
+                📡 藍牙數據接收中（尋找正確通訊協定）...
             </div>
             <div style="text-align: left; background: #eef5fc; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 0.9rem; max-height: 200px; overflow-y: auto;">
                 ${debugItemsHtml}
@@ -124,9 +150,8 @@ function parseGasData(rawData) {
                 原始字串: ${cleanData}
             </div>
         `;
-
     } catch (err) {
-        console.error("解析渲染錯誤：", err);
+        console.error(err);
     }
 }
 
