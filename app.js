@@ -99,27 +99,38 @@ function handleDataReceived(event) {
 // 解析字串並動態更新 UI
 function parseGasData(rawData) {
     const gasDiv = document.getElementById('gas-display');
+    
     try {
-        const dataArray = rawData.split(',');
-        if (dataArray.length >= 9) {
-            // 清理空白字元
-            const oxygenStr = dataArray[8] ? dataArray[8].trim() : "N/A"; 
-            
-            gasDiv.innerHTML = `
-                <div style="font-size: 1.2rem; color: #555;">即時環境數據：</div>
-                <div style="font-size: 3.5rem; font-weight: bold; color: #0078d7; margin: 10px 0;">
-                    O₂: ${oxygenStr} %
-                </div>
-                <div style="font-size: 0.85rem; color: #999; word-break: break-all;">
-                    Log: ${rawData.replace(/\x02|\x03|\x04/g, '')}
-                </div>
-            `;
-        }
+        // 先把看不見的控制字元（開頭、結尾、通訊釋放碼）清除
+        const cleanData = rawData.replace(/\x02|\x03|\x04/g, '').trim();
+        
+        // 用逗號切開
+        const dataArray = cleanData.split(',');
+        
+        // 【除錯關鍵】我們直接把切出來的所有陣列欄位列出來，看看到底哪一個才是 20.9
+        let debugItemsHtml = "";
+        dataArray.forEach((item, index) => {
+            debugItemsHtml += `<b style="color:#0078d7;">[欄位 ${index}]:</b> ${item.trim()} <br>`;
+        });
+
+        // 直接暴力刷新 UI，把所有收到的東西全部攤開
+        gasDiv.innerHTML = `
+            <div style="font-size: 1.1rem; font-weight: bold; color: green; margin-bottom: 10px;">
+                📡 藍牙數據接收成功！
+            </div>
+            <div style="text-align: left; background: #eef5fc; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 0.9rem; max-height: 150px; overflow-y: auto;">
+                ${debugItemsHtml}
+            </div>
+            <div style="margin-top: 10px; font-size: 0.8rem; color: #999; word-break: break-all;">
+                原始全字串: ${cleanData}
+            </div>
+        `;
+
     } catch (err) {
         console.error("解析錯誤：", err);
+        gasDiv.innerText = "解析出錯: " + err.message;
     }
 }
-
 // 斷線觸發
 function onDisconnected(event) {
     const device = event.target;
