@@ -2,21 +2,19 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>GX-3R Pro 輕量化監控</title>
+    <title>GX-3R Pro 監控器</title>
     <style>
-        body { background: #121212; color: #fff; font-family: sans-serif; text-align: center; padding: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; max-width: 800px; margin: 20px auto; }
+        body { background: #121212; color: #fff; text-align: center; font-family: sans-serif; }
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-width: 900px; margin: 20px auto; }
         .card { background: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; }
         .value { color: #00ff66; font-size: 24px; font-weight: bold; }
-        button { padding: 15px 30px; font-size: 18px; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white; }
+        #debug-log { background: #000; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; margin-top: 20px; text-align: left; max-height: 150px; overflow-y: auto; }
     </style>
 </head>
 <body>
-
     <h1>GX-3R Pro 即時儀表板</h1>
-    <button id="btn">連線儀器</button>
-    <div id="status" style="margin:10px;">請點擊連線</div>
-
+    <button id="btn" style="padding:15px 30px; font-size:18px;">連線儀器</button>
+    <div id="status">監控中...</div>
     <div class="grid">
         <div class="card">CH₄<br><div class="value" id="CH4">--</div></div>
         <div class="card">O₂<br><div class="value" id="O2">--</div></div>
@@ -24,11 +22,15 @@
         <div class="card">H₂S<br><div class="value" id="H2S">--</div></div>
         <div class="card">CO₂<br><div class="value" id="CO2">--</div></div>
     </div>
+    <div id="debug-log">Debug 視窗：等待數據...</div>
 
 <script>
     const SERVICE = '5699d362-0c53-11e7-93ae-92361f002671';
     const TX = '5699d646-0c53-11e7-93ae-92361f002671';
     const RX = '5699d772-0c53-11e7-93ae-92361f002671';
+    const log = document.getElementById('debug-log');
+
+    function updateLog(msg) { log.innerText = msg; }
 
     document.getElementById('btn').onclick = async () => {
         try {
@@ -39,23 +41,23 @@
 
             await notify.startNotifications();
             notify.oncharacteristicvaluechanged = (e) => {
-                const text = new TextDecoder().decode(e.target.value);
+                const arr = new Uint8Array(e.target.value.buffer);
+                const text = new TextDecoder().decode(arr);
+                updateLog("收到數據: " + text); // 【關鍵：在這裡看儀器吐出什麼】
+                
                 const nums = text.match(/[-+]?[0-9]*\.?[0-9]+/g);
-                if (nums && nums.length >= 9) {
-                    const idx = nums.findIndex(v => v > 18 && v < 22); // 找氧氣
-                    if (idx !== -1) {
-                        document.getElementById('CH4').textContent = nums[idx-1];
-                        document.getElementById('O2').textContent = nums[idx];
-                        document.getElementById('CO').textContent = nums[idx+1];
-                        document.getElementById('H2S').textContent = nums[idx+2];
-                        document.getElementById('CO2').textContent = nums[idx+3];
-                    }
+                if (nums && nums.length >= 5) {
+                    document.getElementById('CH4').innerText = nums[0];
+                    document.getElementById('O2').innerText = nums[1];
+                    document.getElementById('CO').innerText = nums[2];
+                    document.getElementById('H2S').innerText = nums[3];
+                    document.getElementById('CO2').innerText = nums[4];
                 }
             };
 
-            // 持續發送輪詢指令
             setInterval(async () => {
-                const cmd = "0000DH,R,";
+                // 發送 GD,R 指令 (讀取氣體)
+                const cmd = "0000GD,R,";
                 let bytes = [0x02, ...[...cmd].map(c => c.charCodeAt(0)), 0x03];
                 let sum = bytes.reduce((a, b) => a + b, 0);
                 let hex = ((-sum) & 0xFF).toString(16).toUpperCase().padStart(2, '0');
@@ -63,11 +65,7 @@
                 bytes.push(0x04);
                 await write.writeValue(new Uint8Array(bytes));
             }, 1000);
-            
-            document.getElementById('status').textContent = "監控中...";
-        } catch (e) {
-            document.getElementById('status').textContent = "錯誤: " + e.message;
-        }
+        } catch (e) { updateLog("錯誤: " + e.message); }
     };
 </script>
 </body>
