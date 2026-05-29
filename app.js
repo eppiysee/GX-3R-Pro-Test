@@ -1,35 +1,51 @@
-// 1. 定義符合規格的 Checksum 計算函數
-function calculateCheckSum(dataString) {
-    // 將 STX(0x02) 後到 ETX(0x03) 前的所有 ASCII 字元加總
-    let sum = 0x02; // STX
-    for (let i = 0; i < dataString.length; i++) {
-        sum += dataString.charCodeAt(i);
-    }
-    sum += 0x03; // ETX
-    // 取總和的後兩位 Hex 並轉為大寫字串
+const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
+const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671';
+const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671';
+
+let writeChar;
+
+// 依據規格書計算 Checksum
+function calculateCheckSum(cmd) {
+    let sum = 0x02 + 0x03; // STX + ETX
+    for (let i = 0; i < cmd.length; i++) sum += cmd.charCodeAt(i);
     return (sum & 0xFF).toString(16).toUpperCase().padStart(2, '0');
 }
 
-// 2. 建構正確的封包
 async function sendCommand() {
-    if (!writeCharacteristic) return;
-
-    // 指令格式: Address(00) + Channel(00) + Command(DH) + Subcommand(R)
-    // 總字串: "0000DH,R"
-    const cmdStr = "0000DH,R";
-    const sumHex = calculateCheckSum(cmdStr);
-    
-    // 建構 Array: STX + DATA + ETX + SUM + EOT
+    if (!writeChar) return;
+    const cmd = "0000DH,R"; // 讀取數據指令
+    const sum = calculateCheckSum(cmd);
     const encoder = new TextEncoder();
-    const dataBytes = encoder.encode(cmdStr);
-    const sumBytes = encoder.encode(sumHex);
     
-    const packet = new Uint8Array(1 + dataBytes.length + 1 + 2 + 1);
-    packet[0] = 0x02; // STX
-    packet.set(dataBytes, 1);
-    packet[1 + dataBytes.length] = 0x03; // ETX
-    packet.set(sumBytes, 1 + dataBytes.length + 1);
-    packet[packet.length - 1] = 0x04; // EOT
+    // 封包: STX(0x02) + DATA + ETX(0x03) + SUM + EOT(0x04)
+    const packet = new Uint8Array([0x02, ...encoder.encode(cmd), 0x03, ...encoder.encode(sum), 0x04]);
+    await writeChar.writeValue(packet);
+}
 
-    await writeCharacteristic.writeValue(packet);
+async function connectToRiken() {
+    try {
+        const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [RIKEN_SERVICE_UUID] }] });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(RIKEN_SERVICE_UUID);
+        writeChar = await service.getCharacteristic(WRITE_CHAR_UUID);
+        const notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID);
+
+        await notifyChar.startNotifications();
+        notifyChar.oncharacteristicvaluechanged = (e) => {
+            const raw = new TextDecoder().decode(e.target.value);
+            document.getElementById('raw-log').innerText = "原始數據: " + raw;
+            // 若為數據回應，解析字串 (以逗號分隔)
+            if (raw.includes("DH,R")) {
+                const parts = raw.split(',');
+                if (parts.length >= 8) {
+                    document.getElementById('CH4').innerText = parts[3];
+                    document.getElementById('O2').innerText = parts[4];
+                    document.getElementById('CO').innerText = parts[5];
+                    document.getElementById('H2S').innerText = parts[6];
+                    document.getElementById('CO2').innerText = parts[7];
+                }
+            }
+        };
+        setInterval(sendCommand, 1000); // 規格書建議 1 秒週期
+    } catch (e) { alert("連線錯誤: " + e.message); }
 }

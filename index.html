@@ -2,69 +2,18 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>GX-3R Pro 監控系統</title>
-    <style>
-        body { font-family: sans-serif; text-align: center; background: #f4f6f9; padding: 20px; }
-        .card { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
-        .box { padding: 15px; border: 1px solid #ddd; border-radius: 8px; background: #fff; }
-        .val { font-size: 1.2rem; font-weight: bold; color: #0078d7; }
-    </style>
+    <title>GX-3R Pro 即時監控</title>
 </head>
 <body>
-
-<div class="card">
-    <h2>GX-3R Pro 監控</h2>
-    <button id="btn" style="padding:10px 20px;">連線儀器</button>
-    <div id="status" style="margin:10px 0;">等待連線...</div>
-    
-    <div class="grid">
-        <div class="box">CH₄<br><div class="val" id="CH4">--</div></div>
-        <div class="box">O₂<br><div class="val" id="O2">--</div></div>
-        <div class="box">CO<br><div class="val" id="CO">--</div></div>
-        <div class="box">H₂S<br><div class="val" id="H2S">--</div></div>
-        <div class="box">CO₂<br><div class="val" id="CO2">--</div></div>
+    <button onclick="connectToRiken()">連線並讀取</button>
+    <div id="raw-log">等待數據...</div>
+    <div style="display:grid; grid-template-columns: repeat(2, 1fr);">
+        <div>CH4: <span id="CH4">--</span></div>
+        <div>O2: <span id="O2">--</span></div>
+        <div>CO: <span id="CO">--</span></div>
+        <div>H2S: <span id="H2S">--</span></div>
+        <div>CO2: <span id="CO2">--</span></div>
     </div>
-    <div id="raw-log" style="font-size:0.7rem; color:#888; margin-top:20px; word-break:break-all;"></div>
-</div>
-
-<script>
-    // 綁定按鈕與連線
-    document.getElementById('btn').onclick = async () => {
-        try {
-            const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: ['5699d362-0c53-11e7-93ae-92361f002671'] }] });
-            const srv = await (await dev.gatt.connect()).getPrimaryService('5699d362-0c53-11e7-93ae-92361f002671');
-            const notify = await srv.getCharacteristic('5699d646-0c53-11e7-93ae-92361f002671');
-            const write = await srv.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
-
-            await notify.startNotifications();
-            notify.oncharacteristicvaluechanged = (e) => {
-                const raw = new TextDecoder().decode(e.target.value);
-                document.getElementById('raw-log').innerText = "原始: " + raw;
-                
-                // 解析邏輯：假設格式為 0000DH,R,狀態,CH4,O2,CO,H2S,CO2...
-                const p = raw.split(',');
-                if (p.length >= 8) {
-                    document.getElementById('CH4').innerText = p[3];
-                    document.getElementById('O2').innerText = p[4];
-                    document.getElementById('CO').innerText = p[5];
-                    document.getElementById('H2S').innerText = p[6];
-                    document.getElementById('CO2').innerText = p[7];
-                }
-            };
-
-            // 持續發送請求
-            setInterval(async () => {
-                // 發送請求 (包含 STX/ETX 與簡單校驗)
-                const packet = new Uint8Array([0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x03, 0x41, 0x38, 0x04]);
-                await write.writeValue(packet);
-            }, 2000);
-            
-            document.getElementById('status').innerText = "監控中...";
-        } catch (err) {
-            document.getElementById('status').innerText = "錯誤: " + err.message;
-        }
-    };
-</script>
+    <script src="app.js"></script>
 </body>
 </html>
