@@ -1,57 +1,82 @@
-async function sendCorrectedCommand() {
+// ==========================================
+// 理研 GX-3R Pro - 最終成功運行版 app.js
+// ==========================================
+
+const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
+const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671';
+const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671';
+
+let writeCharacteristic;
+
+// 1. 核心：根據手冊規範組裝與發送封包
+async function sendCommand() {
     if (!writeCharacteristic) return;
 
-    // 依據手冊 P.31 規範，指令結構：STX(0x02) + 數據 + ETX(0x03) + SUM + EOT(0x04)
-    // 我們將 SUM 計算簡化為固定字串測試
-    const data = "0000DH,R"; // 讀取數據指令
+    // 手冊標準指令 (Address:00, Channel:00, Command:DH, Subcommand:R)
+    const data = "0000DH,R"; 
     const STX = 0x02;
     const ETX = 0x03;
     const EOT = 0x04;
     
-    // 計算 SUM (0x02 到 0x03 之間所有 ASCII 的總和)
+    // 計算 SUM (依據手冊規範：STX 到 ETX 間所有位元組總和)
     let sumVal = STX + ETX;
     for (let i = 0; i < data.length; i++) sumVal += data.charCodeAt(i);
     const sumHex = (sumVal & 0xFF).toString(16).toUpperCase().padStart(2, '0');
 
-    // 組裝封包: [02] [數據] [03] [SUM1] [SUM2] [04]
+    // 組裝封包: [STX] [Data] [ETX] [SUM_ASCII] [EOT]
     const encoder = new TextEncoder();
     const dataArr = encoder.encode(data);
     const sumArr = encoder.encode(sumHex);
-    
     const packet = new Uint8Array(1 + dataArr.length + 1 + sumArr.length + 1);
+    
     packet[0] = STX;
     packet.set(dataArr, 1);
     packet[1 + dataArr.length] = ETX;
     packet.set(sumArr, 1 + dataArr.length + 1);
     packet[packet.length - 1] = EOT;
 
-    // 發送並確保緩衝刷新
     await writeCharacteristic.writeValue(packet);
-    console.log("已觸發手冊標準封包:", packet);
+    console.log("已發送封包:", packet);
 }
 
-// 確保連線時啟動通知
+// 2. 初始化連線與數據監聽
 async function connectToRiken() {
     try {
         const device = await navigator.bluetooth.requestDevice({
-            filters: [{ services: ['5699d362-0c53-11e7-93ae-92361f002671'] }]
+            filters: [{ services: [RIKEN_SERVICE_UUID] }]
         });
         const server = await device.gatt.connect();
-        const service = await server.getPrimaryService('5699d362-0c53-11e7-93ae-92361f002671');
+        const service = await server.getPrimaryService(RIKEN_SERVICE_UUID);
         
-        writeCharacteristic = await service.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
-        const notifyChar = await service.getCharacteristic('5699d646-0c53-11e7-93ae-92361f002671');
+        writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
+        const notifyChar = await service.getCharacteristic(NOTIFY_CHAR_UUID);
 
         await notifyChar.startNotifications();
         notifyChar.oncharacteristicvaluechanged = (e) => {
             const raw = new TextDecoder().decode(e.target.value);
-            document.getElementById('gas-display').innerText = "儀器回傳: " + raw;
+            parseAndDisplay(raw);
         };
 
-        document.getElementById('status').innerText = "連線成功，正在喚醒儀器...";
-        // 連線後每 2 秒嘗試一次
-        setInterval(sendCorrectedCommand, 2000);
+        document.getElementById('status').innerText = "已連線，讀取中...";
+        // 啟動定時讀取循環
+        setInterval(sendCommand, 2000); 
     } catch (e) {
-        document.getElementById('status').innerText = "錯誤: " + e.message;
+        document.getElementById('status').innerText = "連線失敗: " + e.message;
+    }
+}
+
+// 3. 數據解析與網頁渲染
+function parseAndDisplay(raw) {
+    console.log("收到數據:", raw);
+    const parts = raw.split(',');
+    
+    // 檢查欄位是否存在並渲染
+    if (parts.length >= 4) {
+        document.getElementById('gas-display').innerHTML = `
+            <div style="padding: 20px; border: 2px solid #2ecc71; border-radius: 10px; background: #f0fff4;">
+                <h3 style="margin:0; color:#27ae60;">氧氣濃度 (O₂)</h3>
+                <div style="font-size: 40px; font-weight: bold; color: #2ecc71;">${parts[3]} %</div>
+            </div>
+        `;
     }
 }
