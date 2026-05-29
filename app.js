@@ -1,55 +1,45 @@
+// 1. 校正回歸！門牌號碼換回一開始正確的 772 與 646
 const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
-const WRITE_CHAR_UUID    = '5699d773-0c53-11e7-93ae-92361f002671';
-const NOTIFY_CHAR_UUID   = '5699d647-0c53-11e7-93ae-92361f002671';
+const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671'; // 換回 772
+const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671'; // 換回 646
 
 let gattServer;
 let writeCharacteristic;
 let notifyCharacteristic;
 let pollingTimer;
 let responseBuffer = "";
+let isWriting = false; // 新增狀態鎖，防止重複寫入撞車
 
-// 輔助函式：讓程式碼暫停幾毫秒，給硬體緩衝時間
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 async function connectToRiken() {
     const statusDiv = document.getElementById('status');
-    const gasDiv = document.getElementById('gas-display');
     
     try {
         statusDiv.innerText = "正在搜尋理研儀器...";
         statusDiv.style.color = "#666";
         
-        // 1. 全開放搜尋 + 預先申報 Service
         const device = await navigator.bluetooth.requestDevice({
             acceptAllDevices: true,
             optionalServices: [RIKEN_SERVICE_UUID]
         });
 
-        statusDiv.innerText = "裝置已選擇，正在建立安全連線...";
-        console.log("Device selected:", device.name);
-        
-        // 監聽主動斷線事件
+        statusDiv.innerText = "正在建立安全連線...";
         device.addEventListener('gattserverdisconnected', onDisconnected);
 
-        // 2. 建立 GATT 連線
         gattServer = await device.gatt.connect();
-        statusDiv.innerText = "藍牙已連線！正在等待硬體初始化...";
-        console.log("GATT Connected");
+        statusDiv.innerText = "藍牙已連線！等待硬體緩衝...";
         
-        // 【核心優化】連線成功後，強制暫停 1.5 秒，等藍牙晶片握手完成再要 Service
-        await delay(1500); 
+        await delay(1500); // 延長緩衝時間，給工控藍牙晶片準備
 
         statusDiv.innerText = "正在讀取理研工控通道...";
-        console.log("Getting Primary Service...");
         const service = await gattServer.getPrimaryService(RIKEN_SERVICE_UUID);
         
-        await delay(500); // 稍微緩衝
+        await delay(500);
 
-        console.log("Getting Characteristics...");
         writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
         notifyCharacteristic = await service.getCharacteristic(NOTIFY_CHAR_UUID);
 
-        // 3. 開啟監聽
         statusDiv.innerText = "正在啟動數據監聽...";
         await notifyCharacteristic.startNotifications();
         notifyCharacteristic.addEventListener('characteristicvaluechanged', handleDataReceived);
@@ -57,9 +47,9 @@ async function connectToRiken() {
         statusDiv.innerText = "系統上線！開始定時讀取數據...";
         statusDiv.style.color = "green";
 
-        // 4. 啟動定時敲門（每 1 秒戳一次）
+        // 2. 將 Polling 時間拉長到 2 秒，避免工控設備來不及反應
         if (pollingTimer) clearInterval(pollingTimer);
-        pollingTimer = setInterval(sendRikenCommand, 1000);
+        pollingTimer = setInterval(sendRikenCommand, 2000);
 
     } catch (error) {
         console.error("【連線錯誤】", error);
@@ -68,52 +58,54 @@ async function connectToRiken() {
     }
 }
 
-// 定時發送 HEX 密碼
+// 3. 改用最穩定的「帶有回應的寫入」，確保密碼百分之百砸進去
 async function sendRikenCommand() {
-    if (!writeCharacteristic) return;
+    if (!writeCharacteristic || isWriting) return;
+    
     const command = new Uint8Array([
         0x02, 0x30, 0x30, 0x30, 0x30, 0x44, 0x48, 0x2C, 0x52, 0x2C, 0x03, 0x41, 0x38, 0x04
     ]);
+    
     try {
-        await writeCharacteristic.writeValueWithoutResponse(command);
+        isWriting = true; // 上鎖
+        // 關鍵修改：使用 writeValueWithResponse 強制等待設備點頭收到
+        await writeCharacteristic.writeValueWithResponse(command);
+        console.log("密碼指令發送成功，等待儀器回傳...");
     } catch (error) {
-        console.warn("發送指令失敗（可能硬體忙碌中）:", error);
+        console.warn("寫入指令卡住或失敗，下個循環自動重試:", error);
+    } finally {
+        isWriting = false; // 解鎖
     }
 }
 
-// 接收與斷包拼接
+// 4. 接收與斷包拼接
 function handleDataReceived(event) {
     const value = event.target.value;
     const decoder = new TextDecoder('utf-8');
     const chunk = decoder.decode(value);
     
     responseBuffer += chunk; 
+    console.log("接收到資料片段:", chunk);
     
-    if (responseBuffer.includes('\x03') || responseBuffer.length > 55) {
-        console.log("收到完整明碼：", responseBuffer);
+    if (responseBuffer.includes('\x03') || responseBuffer.length > 50) {
+        console.log("拿到完整明碼，啟動 UI 更新！");
         parseGasData(responseBuffer);
         responseBuffer = ""; 
     }
 }
 
-// 解析字串並動態更新 UI
+// 5. 暴力除錯解析：把收到的任何東西都攤開在畫面上
 function parseGasData(rawData) {
     const gasDiv = document.getElementById('gas-display');
-    
     try {
-        // 先把看不見的控制字元（開頭、結尾、通訊釋放碼）清除
         const cleanData = rawData.replace(/\x02|\x03|\x04/g, '').trim();
-        
-        // 用逗號切開
         const dataArray = cleanData.split(',');
         
-        // 【除錯關鍵】我們直接把切出來的所有陣列欄位列出來，看看到底哪一個才是 20.9
         let debugItemsHtml = "";
         dataArray.forEach((item, index) => {
             debugItemsHtml += `<b style="color:#0078d7;">[欄位 ${index}]:</b> ${item.trim()} <br>`;
         });
 
-        // 直接暴力刷新 UI，把所有收到的東西全部攤開
         gasDiv.innerHTML = `
             <div style="font-size: 1.1rem; font-weight: bold; color: green; margin-bottom: 10px;">
                 📡 藍牙數據接收成功！
@@ -125,23 +117,17 @@ function parseGasData(rawData) {
                 原始全字串: ${cleanData}
             </div>
         `;
-
     } catch (err) {
         console.error("解析錯誤：", err);
-        gasDiv.innerText = "解析出錯: " + err.message;
     }
 }
-// 斷線觸發
-function onDisconnected(event) {
-    const device = event.target;
-    console.log(`Device ${device.name} is disconnected.`);
+
+function onDisconnected() {
     if (pollingTimer) clearInterval(pollingTimer);
-    document.getElementById('status').innerText = "連線已中斷，請重新連線";
+    document.getElementById('status').innerText = "連線已中斷";
     document.getElementById('status').style.color = "#666";
 }
 
 function disconnectDevice() {
-    if (gattServer && gattServer.connected) {
-        gattServer.disconnect();
-    }
+    if (gattServer && gattServer.connected) gattServer.disconnect();
 }
