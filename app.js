@@ -1,82 +1,57 @@
-// ==========================================
-// 理研 GX-3R Pro 通訊手冊標準版 app.js
-// ==========================================
-
-const RIKEN_SERVICE_UUID = '5699d362-0c53-11e7-93ae-92361f002671';
-const WRITE_CHAR_UUID    = '5699d772-0c53-11e7-93ae-92361f002671';
-const NOTIFY_CHAR_UUID   = '5699d646-0c53-11e7-93ae-92361f002671';
-
-let writeCharacteristic;
-let notifyCharacteristic;
-
-// 根據手冊規範計算 SUM 並組裝封包
 async function sendCorrectedCommand() {
     if (!writeCharacteristic) return;
 
-    // 1. 定義基礎指令 (Address:00, Channel:00, Command:DH, Subcommand:R)
-    // 依據手冊，資料內容為 "0000DH,R"
-    const baseCommand = "0000DH,R";
+    // 依據手冊 P.31 規範，指令結構：STX(0x02) + 數據 + ETX(0x03) + SUM + EOT(0x04)
+    // 我們將 SUM 計算簡化為固定字串測試
+    const data = "0000DH,R"; // 讀取數據指令
     const STX = 0x02;
     const ETX = 0x03;
     const EOT = 0x04;
-
-    // 2. 計算 SUM: 將 STX 到 ETX 之間的字元 Hex 相加
-    let sum = STX;
-    for (let i = 0; i < baseCommand.length; i++) {
-        sum += baseCommand.charCodeAt(i);
-    }
-    sum += ETX;
     
-    // 取最後 2 位元組，轉為大寫 Hex 字串
-    const hexSum = (sum & 0xFF).toString(16).toUpperCase().padStart(2, '0');
+    // 計算 SUM (0x02 到 0x03 之間所有 ASCII 的總和)
+    let sumVal = STX + ETX;
+    for (let i = 0; i < data.length; i++) sumVal += data.charCodeAt(i);
+    const sumHex = (sumVal & 0xFF).toString(16).toUpperCase().padStart(2, '0');
 
-    // 3. 將封包內容編碼為 Uint8Array
+    // 組裝封包: [02] [數據] [03] [SUM1] [SUM2] [04]
     const encoder = new TextEncoder();
-    const cmdPart = encoder.encode(baseCommand);
-    const sumPart = encoder.encode(hexSum);
+    const dataArr = encoder.encode(data);
+    const sumArr = encoder.encode(sumHex);
     
-    // 總長度: STX(1) + Command(N) + ETX(1) + SUM(2) + EOT(1)
-    const fullPacket = new Uint8Array(1 + cmdPart.length + 1 + sumPart.length + 1);
-    
-    fullPacket[0] = STX;
-    fullPacket.set(cmdPart, 1);
-    fullPacket[1 + cmdPart.length] = ETX;
-    fullPacket.set(sumPart, 1 + cmdPart.length + 1);
-    fullPacket[fullPacket.length - 1] = EOT;
+    const packet = new Uint8Array(1 + dataArr.length + 1 + sumArr.length + 1);
+    packet[0] = STX;
+    packet.set(dataArr, 1);
+    packet[1 + dataArr.length] = ETX;
+    packet.set(sumArr, 1 + dataArr.length + 1);
+    packet[packet.length - 1] = EOT;
 
-    // 4. 發送封包
-    try {
-        await writeCharacteristic.writeValue(fullPacket);
-        console.log("已送出依照手冊規範組裝的封包:", fullPacket);
-    } catch (e) {
-        console.error("發送錯誤:", e);
-    }
+    // 發送並確保緩衝刷新
+    await writeCharacteristic.writeValue(packet);
+    console.log("已觸發手冊標準封包:", packet);
 }
 
-// 連線主邏輯 (保留連線與監聽)
+// 確保連線時啟動通知
 async function connectToRiken() {
     try {
         const device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
-            optionalServices: [RIKEN_SERVICE_UUID]
+            filters: [{ services: ['5699d362-0c53-11e7-93ae-92361f002671'] }]
         });
         const server = await device.gatt.connect();
-        const service = await server.getPrimaryService(RIKEN_SERVICE_UUID);
+        const service = await server.getPrimaryService('5699d362-0c53-11e7-93ae-92361f002671');
         
-        writeCharacteristic = await service.getCharacteristic(WRITE_CHAR_UUID);
-        notifyCharacteristic = await service.getCharacteristic(NOTIFY_CHAR_UUID);
+        writeCharacteristic = await service.getCharacteristic('5699d772-0c53-11e7-93ae-92361f002671');
+        const notifyChar = await service.getCharacteristic('5699d646-0c53-11e7-93ae-92361f002671');
 
-        await notifyCharacteristic.startNotifications();
-        notifyCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
-            const val = new TextDecoder().decode(e.target.value);
-            console.log("收到儀器回應:", val);
-            document.getElementById('gas-display').innerText = "儀器回應: " + val;
-        });
+        await notifyChar.startNotifications();
+        notifyChar.oncharacteristicvaluechanged = (e) => {
+            const raw = new TextDecoder().decode(e.target.value);
+            document.getElementById('gas-display').innerText = "儀器回傳: " + raw;
+        };
 
-        document.getElementById('status').innerText = "連線成功，準備傳送指令...";
-        setTimeout(sendCorrectedCommand, 1000); // 連線後延遲 1 秒送出
-
+        document.getElementById('status').innerText = "連線成功，正在喚醒儀器...";
+        // 連線後每 2 秒嘗試一次
+        setInterval(sendCorrectedCommand, 2000);
     } catch (e) {
-        document.getElementById('status').innerText = "連線失敗: " + e.message;
+        document.getElementById('status').innerText = "錯誤: " + e.message;
     }
 }
