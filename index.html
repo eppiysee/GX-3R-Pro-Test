@@ -93,6 +93,16 @@
     #log p.err { color: var(--danger); }
     #log p.warn { color: var(--warn); }
     .timestamp { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--muted); text-align: right; margin-top: 12px; }
+    .rec-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .rec-bar button { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 1px; padding: 10px 20px; background: transparent; border-radius: 4px; cursor: pointer; transition: all 0.3s; }
+    #recBtn { border: 1px solid var(--accent2); color: var(--accent2); }
+    #recBtn:hover:not(:disabled) { background: rgba(0,255,157,0.08); }
+    #recBtn.recording { border-color: var(--danger); color: var(--danger); animation: blink 1s infinite; }
+    #recBtn:disabled { opacity: 0.3; cursor: default; }
+    #exportBtn { border: 1px solid var(--accent); color: var(--accent); }
+    #exportBtn:hover:not(:disabled) { background: rgba(0,212,255,0.08); }
+    #exportBtn:disabled { opacity: 0.3; cursor: default; }
+    #recCount { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--muted); margin-left: 4px; }
   </style>
 </head>
 <body>
@@ -146,6 +156,11 @@
     <div class="card-unit">ppm</div>
     <div class="bar-wrap"><div class="bar-fill" id="bar-CO2"></div></div>
   </div>
+</div>
+<div class="rec-bar">
+  <button id="recBtn" disabled>⏺ 開始記錄</button>
+  <span id="recCount">已記錄：0 筆</span>
+  <button id="exportBtn" disabled>⬇ 匯出 CSV</button>
 </div>
 <div class="log-box">
   <div class="log-title">// SYSTEM LOG</div>
