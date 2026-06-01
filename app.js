@@ -96,7 +96,7 @@ function updateCard(idx, rawVal) {
     return;
   }
 
-  const num = parseFloat(trimmed);
+  const num = parseFloat(trimmed.replace(/[^0-9.-]/g, ""));
   if (isNaN(num)) { valEl.textContent = trimmed; return; }
 
   valEl.textContent = num.toFixed(
@@ -183,6 +183,7 @@ function handleNotification(event) {
 // 發送指令
 // =========================================
 async function sendCommand(cmdBody, useChar2 = false) {
+  log(`TX[v3]: ${cmdBody}`, "");
   const char = useChar2 ? rx2Characteristic : rxCharacteristic;
   if (!char) return;
   try {
