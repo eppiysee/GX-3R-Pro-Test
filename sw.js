@@ -1,4 +1,4 @@
-const CACHE_NAME = 'riken-monitor-v1';
+const CACHE_NAME = 'riken-gx3r-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -8,14 +8,21 @@ const ASSETS = [
   './icon-512.png'
 ];
 
-// 安裝時快取靜態檔案
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
+  self.skipWaiting();
 });
 
-// 攔截請求，沒網時從快取抓網頁
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    )
+  );
+});
+
 self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.match(e.request).then((response) => response || fetch(e.request))

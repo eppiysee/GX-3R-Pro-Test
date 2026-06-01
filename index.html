@@ -1,39 +1,157 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <title>GX-3R Pro 即時監控</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>理研 GX-3R Pro 監控</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0f1a;
+      --panel: #111827;
+      --border: #1e3a5f;
+      --accent: #00d4ff;
+      --accent2: #00ff9d;
+      --warn: #ffb300;
+      --danger: #ff3d3d;
+      --text: #e2e8f0;
+      --muted: #4a6080;
+      --ch4: #f59e0b;
+      --co: #ef4444;
+      --h2s: #a78bfa;
+      --o2: #34d399;
+      --co2: #60a5fa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 16px;
+      background-image:
+        radial-gradient(ellipse at 20% 50%, rgba(0,212,255,0.04) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 20%, rgba(0,255,157,0.03) 0%, transparent 50%);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+    .logo { font-family: 'Share Tech Mono', monospace; font-size: 13px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+    .logo strong { display: block; font-family: 'Noto Sans TC', sans-serif; font-size: 18px; color: var(--accent); letter-spacing: 1px; }
+    #status-badge {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px; padding: 6px 14px; border-radius: 20px;
+      border: 1px solid var(--muted); color: var(--muted);
+      transition: all 0.4s; letter-spacing: 1px;
+    }
+    #status-badge.connected { border-color: var(--accent2); color: var(--accent2); box-shadow: 0 0 12px rgba(0,255,157,0.2); }
+    #status-badge.connecting { border-color: var(--warn); color: var(--warn); animation: blink 1s infinite; }
+    #status-badge.error { border-color: var(--danger); color: var(--danger); }
+    @keyframes blink { 50% { opacity: 0.4; } }
+    .connect-area { text-align: center; margin-bottom: 24px; }
+    #connectBtn {
+      font-family: 'Share Tech Mono', monospace; font-size: 14px; letter-spacing: 2px;
+      padding: 14px 40px; background: transparent;
+      border: 1px solid var(--accent); color: var(--accent);
+      border-radius: 4px; cursor: pointer; transition: all 0.3s; text-transform: uppercase;
+    }
+    #connectBtn:hover { background: rgba(0,212,255,0.08); box-shadow: 0 0 20px rgba(0,212,255,0.3); }
+    #connectBtn:disabled { opacity: 0.4; cursor: default; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .grid-wide { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 18px 16px 14px;
+      position: relative; overflow: hidden; transition: border-color 0.3s;
+    }
+    .card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0;
+      height: 3px; background: var(--card-color, var(--accent)); opacity: 0.7;
+    }
+    .card.alarm { border-color: var(--danger); animation: alarm-pulse 1s infinite; }
+    @keyframes alarm-pulse { 50% { box-shadow: 0 0 16px rgba(255,61,61,0.4); } }
+    .card-label { font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+    .card-name { font-size: 13px; color: var(--text); margin-bottom: 12px; opacity: 0.8; }
+    .card-value { font-family: 'Share Tech Mono', monospace; font-size: 42px; font-weight: 400; color: var(--card-color, var(--accent)); line-height: 1; transition: color 0.3s; }
+    .card-unit { font-family: 'Share Tech Mono', monospace; font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .bar-wrap { margin-top: 12px; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+    .bar-fill { height: 100%; background: var(--card-color, var(--accent)); border-radius: 2px; width: 0%; transition: width 0.5s ease; opacity: 0.6; }
+    .alarm-tag { display: none; position: absolute; top: 12px; right: 12px; font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--danger); letter-spacing: 1px; animation: blink 0.6s infinite; }
+    .card.alarm .alarm-tag { display: block; }
+    .log-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .log-title { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--muted); letter-spacing: 2px; margin-bottom: 10px; }
+    #log { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--muted); height: 80px; overflow-y: auto; line-height: 1.8; }
+    #log p { margin: 0; }
+    #log p.ok { color: var(--accent2); }
+    #log p.err { color: var(--danger); }
+    #log p.warn { color: var(--warn); }
+    .timestamp { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--muted); text-align: right; margin-top: 12px; }
+  </style>
 </head>
 <body>
-    <div class="card">
-        <h2>GX-3R Pro 監控系統</h2>
-        <button id="connectBtn">連線並讀取</button>
-        <div id="status">等待連線...</div>
-        <div id="gas-display" style="margin-top:20px;">
-            <p>CH4: <span id="CH4">--</span></p>
-            <p>O2: <span id="O2">--</span></p>
-            <p>CO: <span id="CO">--</span></p>
-            <p>H2S: <span id="H2S">--</span></p>
-        </div>
-    </div>
-
-    <script>
-        // 將這些邏輯放在最後，確保 DOM 載入完成
-        async function handleNotification(event) {
-            const raw = new TextDecoder().decode(event.target.value);
-            console.log("收到數據:", raw);
-            
-            // 解析數據邏輯
-            if (raw.includes("DH,R")) {
-                const p = raw.split(',');
-                if (p.length >= 7) {
-                    document.getElementById('CH4').innerText = p[3];
-                    document.getElementById('O2').innerText = p[4];
-                    document.getElementById('CO').innerText = p[5];
-                    document.getElementById('H2S').innerText = p[6];
-                }
-            }
-        }
-    </script>
+<header>
+  <div class="logo">RIKEN KEIKI<strong>GX-3R Pro</strong></div>
+  <div id="status-badge">● 未連線</div>
+</header>
+<div class="connect-area">
+  <button id="connectBtn">▶ 藍牙連線</button>
+</div>
+<div class="grid">
+  <div class="card" id="card-CH4" style="--card-color: var(--ch4)">
+    <div class="alarm-tag">⚠ ALARM</div>
+    <div class="card-label">CH4</div>
+    <div class="card-name">甲烷</div>
+    <div class="card-value" id="val-CH4">--</div>
+    <div class="card-unit">% LEL</div>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-CH4"></div></div>
+  </div>
+  <div class="card" id="card-O2" style="--card-color: var(--o2)">
+    <div class="alarm-tag">⚠ ALARM</div>
+    <div class="card-label">O₂</div>
+    <div class="card-name">氧氣</div>
+    <div class="card-value" id="val-O2">--</div>
+    <div class="card-unit">%</div>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-O2"></div></div>
+  </div>
+  <div class="card" id="card-CO" style="--card-color: var(--co)">
+    <div class="alarm-tag">⚠ ALARM</div>
+    <div class="card-label">CO</div>
+    <div class="card-name">一氧化碳</div>
+    <div class="card-value" id="val-CO">--</div>
+    <div class="card-unit">ppm</div>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-CO"></div></div>
+  </div>
+  <div class="card" id="card-H2S" style="--card-color: var(--h2s)">
+    <div class="alarm-tag">⚠ ALARM</div>
+    <div class="card-label">H₂S</div>
+    <div class="card-name">硫化氫</div>
+    <div class="card-value" id="val-H2S">--</div>
+    <div class="card-unit">ppm</div>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-H2S"></div></div>
+  </div>
+</div>
+<div class="grid-wide">
+  <div class="card" id="card-CO2" style="--card-color: var(--co2)">
+    <div class="alarm-tag">⚠ ALARM</div>
+    <div class="card-label">CO₂</div>
+    <div class="card-name">二氧化碳</div>
+    <div class="card-value" id="val-CO2">--</div>
+    <div class="card-unit">ppm</div>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-CO2"></div></div>
+  </div>
+</div>
+<div class="log-box">
+  <div class="log-title">// SYSTEM LOG</div>
+  <div id="log"><p>等待連線...</p></div>
+</div>
+<div class="timestamp" id="ts">--</div>
+<script src="app.js"></script>
 </body>
 </html>

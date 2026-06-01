@@ -1,10 +1,10 @@
 {
-  "short_name": "理研氣體監監控",
+  "short_name": "GX-3R Monitor",
   "name": "理研 GX-3R Pro 藍牙監控系統",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0078d7",
+  "background_color": "#0a0f1a",
+  "theme_color": "#00d4ff",
   "orientation": "portrait",
   "icons": [
     {
