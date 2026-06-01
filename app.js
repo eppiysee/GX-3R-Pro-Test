@@ -1,45 +1,70 @@
+// UUID 設定
+const GDX_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const GDX_CHAR_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb';
+
+let writeCharacteristic = null;
+
 // =========================================
-// 修正後的 Checksum 計算 (僅累加，不取補數)
+// 建立 BLE 連線與初始化
 // =========================================
-function calculateCheckSum(dataString) {
-    let sum = 0x02; // STX
-    for (let i = 0; i < dataString.length; i++) {
-        sum += dataString.charCodeAt(i);
+async function connectToDevice() {
+    try {
+        console.log("請求連接裝置...");
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: 'GX-3R' }], // 搜尋名稱前綴
+            optionalServices: [GDX_SERVICE_UUID]
+        });
+
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(GDX_SERVICE_UUID);
+        writeCharacteristic = await service.getCharacteristic(GDX_CHAR_UUID);
+
+        // 開啟通知 (這步最重要，否則收不到數據)
+        await writeCharacteristic.startNotifications();
+        writeCharacteristic.addEventListener('characteristicvaluechanged', handleNotification);
+        
+        document.getElementById('status').innerText = "連線成功！";
+        console.log("裝置已連線，準備讀取數據");
+    } catch (err) {
+        console.error("連線錯誤:", err);
+        document.getElementById('status').innerText = "連線失敗: " + err.message;
     }
-    sum += 0x03; // ETX
-    // 規格書要求：取總和的低位元組 (後兩位 Hex)
-    return (sum & 0xFF).toString(16).toUpperCase().padStart(2, '0');
 }
 
 // =========================================
-// 建立符合規格的 BLE 封包
+// 處理藍牙回傳數據 (修改版)
 // =========================================
-function buildPacket(command) {
-    const checksum = calculateCheckSum(command);
-    const encoder = new TextEncoder();
-    const dataBytes = encoder.encode(command);
-    const sumBytes = encoder.encode(checksum);
-
-    // 封包: STX(1) + DATA(N) + ETX(1) + SUM(2) + EOT(1)
-    const packet = new Uint8Array(1 + dataBytes.length + 1 + 2 + 1);
-    packet[0] = 0x02;
-    packet.set(dataBytes, 1);
-    packet[1 + dataBytes.length] = 0x03;
-    packet.set(sumBytes, 1 + dataBytes.length + 1);
-    packet[packet.length - 1] = 0x04;
-    return packet;
+function handleNotification(event) {
+    const value = event.target.value;
+    const raw = new TextDecoder().decode(value);
+    console.log("收到數據:", raw);
+    
+    // 解析數據邏輯 (根據規格書調整)
+    if (raw.includes("DH,R")) {
+        const p = raw.split(',');
+        if (p.length >= 7) {
+            document.getElementById('CH4').innerText = p[3];
+            document.getElementById('O2').innerText = p[4];
+            document.getElementById('CO').innerText = p[5];
+            document.getElementById('H2S').innerText = p[6];
+        }
+    }
 }
 
 // =========================================
-// 發送 DH 指令
+// 觸發連線的按鈕事件
+// =========================================
+document.getElementById('connectBtn').addEventListener('click', connectToDevice);
+
+// =========================================
+// 發送 DH 指令 (保持您原有的邏輯)
 // =========================================
 async function requestDH() {
     if (!writeCharacteristic) return;
     try {
-        const command = "0000DH,R"; // 讀取氣體與狀態
-        const packet = buildPacket(command);
-        console.log("發送 DH 請求:", packet);
-        await writeCharacteristic.writeValue(packet);
+        const command = "0000DH,R\r"; // 注意：規格書通常要求結尾加上 \r 或 \n
+        const encoder = new TextEncoder();
+        await writeCharacteristic.writeValue(encoder.encode(command));
     } catch (err) {
         console.error("發送失敗:", err);
     }
