@@ -44,7 +44,7 @@ function stopRecording() {
   log(`停止記錄，共 ${dataLog.length} 筆`, 'ok');
 }
 
-function addRecord(values, status, battVolt) {
+function addRecord(values, status, battVolt, rawHex, rawText) {
   if (!isRecording) return;
   const now = new Date();
   const record = {
@@ -56,22 +56,25 @@ function addRecord(values, status, battVolt) {
     H2S:  values[2],
     CO:   values[3],
     CO2:  values[4],
-    status: status || '',
-    battV:  battVolt || '',
+    status:  status  || '',
+    battV:   battVolt || '',
+    rawHex:  rawHex  || '',
+    rawText: rawText || '',
   };
   dataLog.push(record);
-  if (dataLog.length > MAX_RECORDS) dataLog.shift(); // 超過上限移除最舊的
+  if (dataLog.length > MAX_RECORDS) dataLog.shift();
   document.getElementById('recCount').textContent = `已記錄：${dataLog.length} 筆`;
 }
 
 function exportCSV() {
   if (dataLog.length === 0) return;
 
-  const headers = ['時間戳(ISO)', '日期', '時間', 'CH4(%LEL)', 'O2(%)', 'H2S(ppm)', 'CO(ppm)', 'CO2(ppm)', '狀態碼', '電池電壓(V)'];
+  const headers = ['時間戳(ISO)', '日期', '時間', 'CH4(%LEL)', 'O2(%)', 'H2S(ppm)', 'CO(ppm)', 'CO2(ppm)', '狀態碼', '電池電壓(V)', '原始封包(hex)', '原始封包(文字)'];
   const rows = dataLog.map(r => [
     r.timestamp, r.date, r.time,
     r.CH4, r.O2, r.H2S, r.CO, r.CO2,
-    r.status, r.battV
+    r.status, r.battV,
+    `"${r.rawHex}"`, `"${r.rawText}"`
   ].join(','));
 
   const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n'); // \uFEFF = BOM，讓 Excel 正確顯示中文
@@ -182,6 +185,12 @@ function processPacket(packet) {
   const parts   = content.split(',');
   const cmd = parts[0], sub = parts[1];
 
+  // 快照原始數據後重置（每個完整封包存一份）
+  const snapHex  = lastRawHex.trim();
+  const snapText = lastRawText.trim();
+  lastRawHex  = '';
+  lastRawText = '';
+
   if (cmd === 'DH' && sub === 'R') {
     if (parts.length >= 12) {
       const status   = parts[2];
@@ -191,7 +200,7 @@ function processPacket(packet) {
         const v = updateCard(i, parts[7 + i]);
         values.push(typeof v === 'number' ? v : parts[7 + i].trim());
       }
-      addRecord(values, status, battVolt); // 記錄到 log
+      addRecord(values, status, battVolt, snapHex, snapText);
     } else {
       log(`⚠ DH 欄位數不足 (${parts.length})`, 'warn');
     }
@@ -205,8 +214,15 @@ function processPacket(packet) {
 // =========================================
 // BLE
 // =========================================
+let lastRawHex  = '';
+let lastRawText = '';
+
 function handleNotification(event) {
-  parseResponse(new TextDecoder('utf-8').decode(event.target.value));
+  const bytes = new Uint8Array(event.target.value.buffer);
+  lastRawHex  += Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join(' ') + ' ';
+  const text   = new TextDecoder('utf-8').decode(event.target.value);
+  lastRawText += text;
+  parseResponse(text);
 }
 
 async function sendCommand(cmdBody, useChar2 = false) {
